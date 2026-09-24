@@ -51,6 +51,8 @@ PDF metadata includes `processed_pages` and `total_pages` (zero until the first 
 
 Publication requires nonempty searchable passages and `acknowledged:true`. A stale revision yields HTTP 409. Duplicate file content by the same uploader in the same scope returns the existing source.
 
+XLSX files use the same upload, review, publish, download, and reprocess endpoints. Extraction covers all worksheets, including hidden tabs, and returns locators such as `Worksheet "Parts" · row 12`; passage text retains cell addresses and inferred header hints. Workbook warnings report nonempty row counts per sheet, hidden sheets, and formula-result limitations. `processed_pages` and `total_pages` remain PDF-specific, not worksheet counts. XLSX processing is one bounded job: at most 100 worksheets, 100,000 populated cells, one million extracted characters, 10,000 archive entries, and 64 MB expanded bytes. Exceeding a limit fails the source, without publishing a partial extraction.
+
 ## Cases and answers
 
 | Method | Endpoint | Request / result |

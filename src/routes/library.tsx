@@ -44,6 +44,7 @@ function Library() {
   const [editing, setEditing] = useState(false);
   const [visiblePassages, setVisiblePassages] = useState(50);
   const [passageQuery, setPassageQuery] = useState("");
+  const [worksheet, setWorksheet] = useState("");
   const [confirmReprocess, setConfirmReprocess] = useState(false);
   const [reviewedText, setReviewedText] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
@@ -99,6 +100,7 @@ function Library() {
     setEditing(false);
     setVisiblePassages(50);
     setPassageQuery("");
+    setWorksheet("");
     setConfirmReprocess(false);
     setDetail(null);
     if (selected) void load(selected).catch((e) => setError(e.message));
@@ -240,13 +242,19 @@ function Library() {
     }
   }
   const doc = detail?.document;
+  const sheetName = (locator: string) => /^Worksheet "(.*)" · row \d+$/.exec(locator)?.[1] || "";
+  const worksheets = [
+    ...new Set(detail?.chunks.map((chunk) => sheetName(chunk.locator)).filter(Boolean)),
+  ];
   const filteredPassages =
-    detail?.chunks.filter((chunk) =>
-      passageQuery
-        .toLowerCase()
-        .trim()
-        .split(/\s+/)
-        .every((term) => `${chunk.locator} ${chunk.content}`.toLowerCase().includes(term)),
+    detail?.chunks.filter(
+      (chunk) =>
+        (!worksheet || sheetName(chunk.locator) === worksheet) &&
+        passageQuery
+          .toLowerCase()
+          .trim()
+          .split(/\s+/)
+          .every((term) => `${chunk.locator} ${chunk.content}`.toLowerCase().includes(term)),
     ) || [];
   const canReplaceText =
     (detail?.chunks.reduce((size, chunk) => size + chunk.content.length + 2, 0) || 0) <= 500_000;
@@ -431,7 +439,9 @@ function Library() {
                 <p className="mt-4 text-sm text-muted">{doc.source_note}</p>
                 <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border border-line bg-bg p-3">
-                    <p className="text-xs text-muted">Original PDF</p>
+                    <p className="text-xs text-muted">
+                      {doc.media_type === "application/pdf" ? "Original PDF" : "Original file"}
+                    </p>
                     <p className="mt-1 text-lg font-semibold">
                       {doc.total_pages > 0
                         ? `${doc.total_pages} pages`
@@ -613,11 +623,34 @@ function Library() {
                     separate note for corrections.
                   </p>
                 )}
+                {!editing && worksheets.length > 0 && (
+                  <label className="field-label mt-4">
+                    Worksheet
+                    <select
+                      aria-label="Worksheet filter"
+                      className="input"
+                      value={worksheet}
+                      onChange={(e) => {
+                        setWorksheet(e.target.value);
+                        setVisiblePassages(50);
+                      }}
+                    >
+                      <option value="">
+                        All worksheets ({worksheets.length} with extracted text)
+                      </option>
+                      {worksheets.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 {!editing && (
                   <input
                     className="input mt-4"
                     aria-label="Search within this source"
-                    placeholder="Find text or a page in this source, e.g. 1208"
+                    placeholder="Find text, a page, or a worksheet, e.g. 1208"
                     value={passageQuery}
                     onChange={(e) => {
                       setPassageQuery(e.target.value);
@@ -776,7 +809,7 @@ function Library() {
                   are retained and reviewed before they inform shared-library answers.
                 </p>
                 <p className="mt-4 max-w-md font-mono text-xs leading-6 text-faint">
-                  PDF · TXT · LOG · DOCX · CSV · JSON · PHOTOS
+                  PDF · XLSX (all tabs) · TXT · LOG · DOCX · CSV · JSON · PHOTOS
                   <br />
                   Up to 20 MB per file · 5 files per upload
                 </p>

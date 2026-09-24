@@ -54,7 +54,7 @@ export function changed() {
   window.dispatchEvent(new Event("workspace-changed"));
 }
 export const SUPPORTED =
-  ".pdf,.txt,.log,.md,.csv,.tsv,.json,.jsonl,.xml,.yaml,.yml,.ini,.conf,.docx,.png,.jpg,.jpeg,.webp";
+  ".pdf,.xlsx,.txt,.log,.md,.csv,.tsv,.json,.jsonl,.xml,.yaml,.yml,.ini,.conf,.docx,.png,.jpg,.jpeg,.webp";
 export async function uploadFile(file: File, caseId?: string) {
   const form = new FormData();
   form.append("file", file);

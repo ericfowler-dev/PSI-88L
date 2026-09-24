@@ -2,6 +2,14 @@
 
 ## Unreleased — independent application
 
+### 2026-09-24 — Excel workbooks with multiple tabs
+
+- Accept `.xlsx` in Library uploads and private case attachments; retain the original workbook and extract every worksheet with tab names, cell addresses, and row citations.
+- Add a worksheet filter for source review. Preserve textual headers as explicit hints, keep rows separate, and recognize SPN/FMI columns for exact diagnostic retrieval.
+- Include hidden worksheets with review warnings; report empty tabs. Use saved formula results with stale/missing-result warnings, without recalculation or external refresh.
+- Bound archive expansion and workbook size; fail oversized or invalid files clearly instead of publishing partial workbook content.
+- Verified multi-tab extraction, publication gating, exact fault retrieval, second-tab search, original downloads, formulas, hidden/empty tabs, and mobile review. See [Excel uploads](docs/excel-uploads.md).
+
 ### 2026-09-24 — Verifiable diagnostic retrieval and refreshed workspace
 
 - Normalize fault-code questions such as `SPN 1208 / FMI 3`, `1208:3`, `1208/3`, and `1208-3`; prioritize the exact pair and distinguish other FMIs. Retain SPN context for FMI-only follow-up questions.

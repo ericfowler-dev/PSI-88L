@@ -7,7 +7,7 @@ Repository: [ericfowler-dev/PSI-88L](https://github.com/ericfowler-dev/PSI-88L).
 ## Implemented
 
 - Sign-in, first-administrator setup, and administrator/editor/technician roles.
-- Pasted text and file uploads: PDF, TXT, LOG, MD, CSV, TSV, JSON, JSONL, XML, YAML, INI, CONF, DOCX, PNG, JPEG, and WebP.
+- Pasted text and file uploads: PDF, XLSX (multiple worksheets), TXT, LOG, MD, CSV, TSV, JSON, JSONL, XML, YAML, INI, CONF, DOCX, PNG, JPEG, and WebP.
 - Private original-file retention, duplicate detection, queued extraction, PDF page references, log/text line references, English OCR for photos and scanned PDFs, and retryable failed jobs.
 - Source preview, corrected transcription, immutable text revisions, review acknowledgment, publication/unpublication, and deletion from retrieval.
 - Optional user-initiated image descriptions through a configured vision-capable model. Descriptions are retained as unverified draft source text for review.
@@ -90,6 +90,7 @@ Run `npm run validate:blueprint` to check hosting configuration against Render's
 - Other formats: one million extracted characters maximum. Whole-document transcription editing and pasted notes: 500,000 characters. Larger PDFs can be reviewed and published without rewriting their text; use a separate technical note for corrections.
 - OCR is English and may misread values. Review technical numbers and units against originals. Diagram interpretation is not automatic for PDF pages.
 - DOCX extraction reads text; embedded images are not separately analyzed. CSV/JSON/logs are searchable text, not a time-series analytics engine.
+- XLSX extraction includes all worksheets, including hidden tabs, with cell/row references and review warnings. Formula results are read from saved values, not recalculated; charts and embedded pictures are not interpreted. Limits: 100 worksheets, 100,000 populated cells, one million extracted characters, and 64 MB expanded archive content. See [Excel uploads](docs/excel-uploads.md).
 - Photo descriptions require a compatible vision model; automatic OCR runs independently of the AI provider.
 - Search is lexical with synonyms, not an embedding/vector implementation. Chunk and citation versions are retained so semantic retrieval can be added later.
 - Deleting a source removes search passages immediately and deletes the original, with durable worker retries if storage is unavailable. Previously saved case answers retain historical evidence snapshots. A full organization retention/purge policy, malware-scanning service, stronger parser isolation, SSO, password reset/email delivery, and cross-user case assignment remain future work.

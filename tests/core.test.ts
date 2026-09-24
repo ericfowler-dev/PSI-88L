@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import ExcelJS from "exceljs";
 import { createCanvas } from "@napi-rs/canvas";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
@@ -749,6 +750,67 @@ test("persistent knowledge application and protected API", async (t) => {
       assert.equal((await ok(await request(`/api/knowledge/${ids[2]}`))).document.status, "review");
     },
   );
+  await t.test(
+    "retains a multi-tab workbook and retrieves published rows from every tab",
+    async () => {
+      const workbook = new ExcelJS.Workbook();
+      const faults = workbook.addWorksheet("Fault codes");
+      faults.addRow(["SPN", "FMI", "Description"]);
+      faults.addRow([76543, 3, "WORKBOOK_EXACT fictional row"]);
+      faults.addRow([76543, 4, "WORKBOOK_OTHER fictional row"]);
+      const parts = workbook.addWorksheet("Parts inventory");
+      parts.addRow(["Part", "Quantity"]);
+      parts.addRow(["ZIRCON_TAB_TWO", 0]);
+      const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array(bytes)]), "multiple-tabs.xlsx");
+      const uploaded = await ok(
+        await handleAPI(
+          new Request("http://localhost:8080/api/knowledge/upload", {
+            method: "POST",
+            headers: { cookie },
+            body: form,
+          }),
+        ),
+      );
+      const id = uploaded.document.id;
+      await processNextJob();
+      const detail = await ok(await request(`/api/knowledge/${id}`));
+      assert.equal(detail.document.status, "review");
+      assert.ok(
+        detail.chunks.some((chunk: { locator: string }) =>
+          chunk.locator.includes('"Parts inventory"'),
+        ),
+      );
+      assert.equal(
+        (await ok(await request("/api/knowledge/search", "POST", { question: "ZIRCON_TAB_TWO" })))
+          .sources.length,
+        0,
+      );
+      await ok(
+        await request(`/api/knowledge/${id}`, "PATCH", {
+          revision: 1,
+          publish: true,
+          acknowledged: true,
+        }),
+      );
+      const exact = await ok(
+        await request("/api/knowledge/search", "POST", { question: "76543:3" }),
+      );
+      assert.equal(exact.exactCodeMatch, true);
+      assert.match(exact.sources[0].content, /WORKBOOK_EXACT/);
+      assert.ok(
+        !exact.sources.some((s: { content: string }) => s.content.includes("WORKBOOK_OTHER")),
+      );
+      const second = await ok(
+        await request("/api/knowledge/search", "POST", { question: "ZIRCON_TAB_TWO" }),
+      );
+      assert.match(second.sources[0].locator, /Parts inventory.*row 2/);
+      assert.match(second.sources[0].content, /Quantity; header row 1\): 0/);
+      const download = await request(`/api/knowledge/${id}/download`);
+      assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+    },
+  );
   await t.test("removal excludes content from retrieval", async () => {
     await ok(await request(`/api/knowledge/${documentId}`, "DELETE"));
     assert.equal((await request(`/api/knowledge/${documentId}/download`)).status, 404);
@@ -773,6 +835,70 @@ test("persistent knowledge application and protected API", async (t) => {
   });
 });
 test("file extraction and partial-stream rendering", async (t) => {
+  await t.test(
+    "extracts hidden and sparse worksheets, merged headings, and saved formula results without calculating",
+    async () => {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Measurements");
+      sheet.mergeCells("A1:C1");
+      sheet.getCell("A1").value = "Fixture readings";
+      sheet.getRow(3).values = ["Part", "Value", "Date"];
+      sheet.getRow(8).values = ["0012", 0, new Date("2026-09-24T00:00:00Z")];
+      sheet.getCell("B9").value = { formula: "1+2", result: 3 };
+      sheet.getCell("B10").value = { formula: "1+3" };
+      sheet.getCell("A12").value = { richText: [{ text: "RICH" }, { text: " TEXT" }] };
+      sheet.getCell("B12").value = false;
+      sheet.getCell("A13").value = 7;
+      sheet.getCell("A13").numFmt = "0000";
+      workbook.addWorksheet("Hidden notes", { state: "hidden" }).getCell("D50").value =
+        "HIDDEN_REFERENCE";
+      workbook.addWorksheet("Empty tab");
+      const result = await extract("fixture.XLSX", Buffer.from(await workbook.xlsx.writeBuffer()));
+      const content = result.passages.map((p) => p.content).join("\n");
+      assert.match(content, /A8 \(Part; header row 3\): 0012/);
+      assert.match(content, /B8 \(Value; header row 3\): 0/);
+      assert.match(content, /2026-09-24T00:00:00.000Z/);
+      assert.match(content, /3 \[saved result; formula 1\+2\]/);
+      assert.match(content, /formula 1\+3; no saved result/);
+      assert.match(content, /RICH TEXT/);
+      assert.match(content, /false/);
+      assert.match(content, /0007/);
+      assert.equal(content.match(/Fixture readings/g)?.length, 1);
+      assert.ok(result.passages.some((p) => /Hidden notes.*row 50/.test(p.locator)));
+      assert.ok(result.warnings.some((w) => /Empty tab.*0 nonempty rows/.test(w)));
+      assert.ok(result.warnings.some((w) => /hidden; its cells are included/.test(w)));
+      assert.ok(result.warnings.some((w) => /no saved result/.test(w)));
+      await assert.rejects(
+        extract("invalid.xlsx", Buffer.from("PKbroken")),
+        /Invalid XLSX archive/,
+      );
+      assert.throws(
+        () => validateFile("encrypted.xlsx", Buffer.from([0xd0, 0xcf, 0x11])),
+        /unencrypted XLSX/,
+      );
+      const excessive = new ExcelJS.Workbook();
+      const oversizedArchive = Buffer.from(await workbook.xlsx.writeBuffer());
+      // Inflate only a compressed entry's declared size: reject before allocating it.
+      let central = oversizedArchive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+      while (central >= 0 && oversizedArchive.readUInt16LE(central + 10) !== 8)
+        central = oversizedArchive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), central + 4);
+      assert.ok(central >= 0);
+      oversizedArchive.writeUInt32LE(65 * 1024 * 1024, central + 24);
+      await assert.rejects(extract("expanded.xlsx", oversizedArchive), /64 MB/);
+      const tooMuchText = new ExcelJS.Workbook();
+      const largeSheet = tooMuchText.addWorksheet("Large text");
+      for (let i = 0; i < 40; i++) largeSheet.addRow(["X".repeat(30000)]);
+      await assert.rejects(
+        extract("too-much-text.xlsx", Buffer.from(await tooMuchText.xlsx.writeBuffer())),
+        /one million characters/,
+      );
+      for (let i = 0; i < 101; i++) excessive.addWorksheet(`Tab ${i}`).getCell("A1").value = "test";
+      await assert.rejects(
+        extract("too-many.xlsx", Buffer.from(await excessive.xlsx.writeBuffer())),
+        /100 worksheets/,
+      );
+    },
+  );
   await t.test("normalizes fault notation without treating dates or times as fault codes", () => {
     for (const value of ["2026/03/12", "at 12:30 yesterday", "1208 volts", "oil pressure 3"])
       assert.equal(faultCode(value), undefined, value);

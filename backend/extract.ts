@@ -10,6 +10,7 @@ export const mimeTypes: Record<string, string> = {
   ".log": "text/plain",
   ".md": "text/markdown",
   ".csv": "text/csv",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".tsv": "text/tab-separated-values",
   ".json": "application/json",
   ".jsonl": "text/plain",
@@ -31,7 +32,7 @@ export function validateFile(filename: string, bytes: Buffer) {
   check(
     mime,
     415,
-    "Supported files: PDF, TXT, LOG, MD, CSV, TSV, JSON, JSONL, XML, YAML, INI, CONF, DOCX, PNG, JPEG, WebP.",
+    "Supported files: PDF, XLSX, TXT, LOG, MD, CSV, TSV, JSON, JSONL, XML, YAML, INI, CONF, DOCX, PNG, JPEG, WebP.",
   );
   check(
     bytes.length > 0 && bytes.length <= MAX_FILE_BYTES,
@@ -44,8 +45,12 @@ export function validateFile(filename: string, bytes: Buffer) {
       415,
       "This file is not a valid PDF.",
     );
-  else if (ext === ".docx")
-    check(bytes[0] === 0x50 && bytes[1] === 0x4b, 415, "This file is not a valid DOCX.");
+  else if (ext === ".docx" || ext === ".xlsx")
+    check(
+      bytes[0] === 0x50 && bytes[1] === 0x4b,
+      415,
+      `This file is not a valid unencrypted ${ext.slice(1).toUpperCase()} file.`,
+    );
   else if (mime.startsWith("image/")) {
     const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
     const jpg = bytes[0] === 0xff && bytes[1] === 0xd8;
@@ -236,6 +241,11 @@ export async function extract(
       warnings.push(
         "Image OCR captures visible text, not a verified diagnosis of components. Add a reviewed description for visual details.",
       );
+    } else if (filename.toLowerCase().endsWith(".xlsx")) {
+      const { extractWorkbook } = await import("./workbook.ts");
+      const result = await extractWorkbook(bytes);
+      passages = result.passages;
+      warnings.push(...result.warnings);
     } else if (filename.toLowerCase().endsWith(".docx")) {
       const { extractRawText } = await import("mammoth");
       const result = await extractRawText({ buffer: bytes });

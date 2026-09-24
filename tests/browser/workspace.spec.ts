@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import ExcelJS from "exceljs";
 import { mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -237,6 +238,60 @@ test("verify exact fault knowledge, inspect PDF pages, and re-extract with publi
   await expect(dialog.getByText("No usable evidence found")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
+});
+
+test("upload a multi-tab workbook, review both sheets, publish and retrieve the second tab", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("qa@example.test");
+  await page.getByLabel(/^Password/).fill("browser-test-password-123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const workbook = new ExcelJS.Workbook();
+  workbook.addWorksheet("Fault table").addRows([
+    ["SPN", "FMI", "Description"],
+    [54321, 3, "WORKBOOK_BROWSER_ONE"],
+  ]);
+  workbook.addWorksheet("Parts list").addRows([
+    ["Part", "Quantity"],
+    ["SAPPHIRE_BROWSER_TWO", 2],
+  ]);
+  const filename = `workbook-${Date.now()}.xlsx`;
+  await page
+    .getByLabel("Upload library files")
+    .setInputFiles({
+      name: filename,
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
+    });
+  await expect(page.getByRole("button", { name: "Publish knowledge" })).toBeVisible();
+  await expect(
+    page.getByText('Worksheet "Fault table": 2 nonempty rows extracted.', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Worksheet "Parts list": 2 nonempty rows extracted.', { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Worksheet filter").selectOption("Parts list");
+  await expect(page.locator("article")).toHaveCount(2);
+  await expect(page.locator("article").filter({ hasText: "SAPPHIRE_BROWSER_TWO" })).toBeVisible();
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Publish knowledge" }).click();
+  await expect(page.getByText("Published · available", { exact: true })).toBeVisible();
+  const result = await page.request.post("/api/knowledge/search", {
+    data: { question: "SAPPHIRE_BROWSER_TWO" },
+  });
+  const sources = (await result.json()).sources;
+  expect(
+    sources.some(
+      (source: { locator: string; content: string }) =>
+        source.locator.includes('"Parts list" · row 2') &&
+        source.content.includes("SAPPHIRE_BROWSER_TWO"),
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "screenshots/workbook-mobile.png", fullPage: true });
 });
 
 test("long manual progress, passage preview, and failed-upload recovery controls", async ({
