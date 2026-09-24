@@ -1,94 +1,37 @@
 # yaml-language-server: $schema=https://render.com/schema/render.yaml.json
-# Prepared configuration only. Deploying this creates billable resources.
-projects:
-  - name: PSI-88L
-    environments:
-      - name: production
-        databases:
-          - name: psi-88l-db
-            plan: basic-256mb
-            region: oregon
-            ipAllowList: []
-        services:
-          - type: web
-            name: psi-88l
-            runtime: node
-            plan: standard
-            region: oregon
-            repo: https://github.com/ericfowler-dev/PSI-88L
-            branch: main
-            buildCommand: npm ci --include=dev && npm run build
-            preDeployCommand: npm run db:migrate
-            startCommand: npm start
-            healthCheckPath: /api/health
-            autoDeployTrigger: checksPass
-            envVars:
-              - key: NODE_VERSION
-                value: 22.21.1
-              - key: NODE_ENV
-                value: production
-              - key: WORKER_MODE
-                value: external
-              - key: DATABASE_URL
-                fromDatabase:
-                  name: psi-88l-db
-                  property: connectionString
-              - key: APP_SECRET
-                generateValue: true
-              - key: SETUP_TOKEN
-                generateValue: true
-              - key: S3_REGION
-                value: auto
-              - key: S3_ENDPOINT
-                sync: false
-              - key: S3_BUCKET
-                sync: false
-              - key: S3_ACCESS_KEY_ID
-                sync: false
-              - key: S3_SECRET_ACCESS_KEY
-                sync: false
-          - type: worker
-            name: psi-88l-ingestion
-            runtime: node
-            plan: standard
-            region: oregon
-            repo: https://github.com/ericfowler-dev/PSI-88L
-            branch: main
-            buildCommand: npm ci --include=dev
-            startCommand: npm run worker
-            autoDeployTrigger: checksPass
-            envVars:
-              - key: NODE_VERSION
-                value: 22.21.1
-              - key: NODE_ENV
-                value: production
-              - key: WORKER_MODE
-                value: external
-              - key: OCR_CACHE_DIR
-                value: /tmp/psi-ocr
-              - key: DATABASE_URL
-                fromDatabase:
-                  name: psi-88l-db
-                  property: connectionString
-              - key: S3_REGION
-                value: auto
-              - key: S3_ENDPOINT
-                fromService:
-                  type: web
-                  name: psi-88l
-                  envVarKey: S3_ENDPOINT
-              - key: S3_BUCKET
-                fromService:
-                  type: web
-                  name: psi-88l
-                  envVarKey: S3_BUCKET
-              - key: S3_ACCESS_KEY_ID
-                fromService:
-                  type: web
-                  name: psi-88l
-                  envVarKey: S3_ACCESS_KEY_ID
-              - key: S3_SECRET_ACCESS_KEY
-                fromService:
-                  type: web
-                  name: psi-88l
-                  envVarKey: S3_SECRET_ACCESS_KEY
+# Approved pilot: one 2 GB service and a 5 GB persistent disk.
+# Scale-out template: deploy/render-scalable.yaml (requires PostgreSQL and S3).
+services:
+  - type: web
+    name: psi-88l
+    runtime: node
+    plan: standard
+    region: oregon
+    repo: https://github.com/ericfowler-dev/PSI-88L
+    branch: main
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: node scripts/start-disk.mjs
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    disk:
+      name: psi-88l-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: NODE_VERSION
+        value: 22.21.1
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data/psi-88l
+      - key: ALLOW_LOCAL_STORAGE
+        value: 'true'
+      - key: WORKER_MODE
+        value: embedded
+      - key: APP_SECRET
+        generateValue: true
+      - key: SETUP_TOKEN
+        generateValue: true

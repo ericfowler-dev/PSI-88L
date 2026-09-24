@@ -46,9 +46,11 @@ If no relevant source is found, the desk reports the evidence gap instead of ask
 
 ## Production and scaling
 
-`render.yaml` describes a web service, separate ingestion worker, and PostgreSQL database. It is configuration only: no hosting resources have been created. Both services use the same private S3-compatible bucket. Render assigns an `onrender.com` address; a purchased domain is optional.
+The approved initial Render pilot uses `render.yaml`: one 2 GB web service and a 5 GB persistent disk. The database, originals, and embedded worker share `/var/data/psi-88l`. Startup verifies the disk is mounted before serving the app. This pilot has one instance and brief downtime during deployments. Its base cost is approximately $26.25/month, excluding AI usage and workspace/usage charges. See [deployment status](docs/DEPLOYMENT.md).
 
-Required production configuration:
+`deploy/render-scalable.yaml` retains the scale-out design: web service, separate ingestion worker, managed PostgreSQL, and shared private S3-compatible storage. Migrating requires transferring the database and originals; changing environment variables alone does not move existing data. A hosting-assigned address works without purchasing a domain.
+
+Required configuration for the PostgreSQL/S3 scale-out deployment:
 
 - `DATABASE_URL`: durable PostgreSQL, preferably a pooled connection endpoint.
 - `APP_SECRET`: at least 32 random characters; retain it securely to decrypt saved AI credentials after restarts and deployments.
