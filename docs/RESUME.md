@@ -1,5 +1,7 @@
 # PSI-88L checkpoint
 
+Latest status: committed, pushed, and deployed to **https://psi-88l.onrender.com** on September 24, 2026. See [deployment instructions](DEPLOYMENT.md) for the first-account setup token location, service configuration, and scaling limitations. The notes below preserve the earlier local-build checkpoint.
+
 Updated September 24, 2026 after resuming the September 23 pause.
 
 The local application/API build, cleanup, documentation, and verification are complete for the initial release. See [build report](BUILD-REPORT.md) for exact checks and boundaries.

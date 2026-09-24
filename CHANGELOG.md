@@ -2,6 +2,14 @@
 
 ## Unreleased — independent application
 
+### 2026-09-24 — Published and deployed Render pilot
+
+- Committed and pushed the application to GitHub; fixed a clean npm 10 installation lockfile issue and verified Linux CI.
+- Deployed `https://psi-88l.onrender.com` on a 2 GB service with a 5 GB persistent disk, preserving knowledge and uploads under `/var/data/psi-88l`.
+- Added a startup guard requiring the persistent mount, generated private setup/encryption secrets, and retained the PostgreSQL/S3 scale-out Blueprint separately.
+- Verified live health, access protection, and desktop/mobile first-account setup. AI connection remains configurable by the administrator.
+- See [deployment instructions](docs/DEPLOYMENT.md) for setup, service details, and pilot limitations.
+
 ### 2026-09-24 — App, API, and retained knowledge implemented locally
 
 - Replaced Grok preview identity/runtime with an independent Node application, initial administrator setup, sign-in, database sessions, and administrator/editor/reader permissions.
@@ -19,7 +27,7 @@
 - Fixed incomplete Markdown table rendering and stale case/source loading races.
 - Added integration tests, desktop/mobile browser verification, CI, setup/API documentation, and a Render Blueprint validated against the official JSON schema.
 
-Implementation is local. No live AI provider, hosted PostgreSQL, or S3 account has been validated. Nothing has been pushed or deployed. See [README](README.md) for startup and limits and [architecture review](docs/independent-hosting-and-learning.md) for scaling priorities.
+The initial implementation was verified locally; the later deployment entry above records its hosted status. No live AI provider, hosted PostgreSQL, or S3 account has been validated. See [README](README.md) for startup and limits and [architecture review](docs/independent-hosting-and-learning.md) for scaling priorities.
 
 ### 2026-09-23 — Requested direction and repository setup
 

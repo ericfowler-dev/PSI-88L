@@ -1,5 +1,7 @@
 # PSI-88L — build and verification report
 
+This report records local verification before hosting. The subsequent Render pilot is live; see [deployment status](DEPLOYMENT.md) for current setup and verification.
+
 Date: September 24, 2026.
 
 The independent application and authenticated API are implemented locally. Users can retain originals and searchable knowledge from text, PDF, logs, DOCX, photos, and supported structured-text files. Published library passages and owner-private case attachments provide evidence for the configured AI model. Knowledge and cases persist across restarts.

@@ -1,5 +1,7 @@
 # PSI-88L — Architecture, review, and scaling
 
+Deployment update: the approved single-instance persistent-disk pilot is live at **https://psi-88l.onrender.com**. The scalable PostgreSQL/S3 design below remains the migration target. See [deployment details](DEPLOYMENT.md); earlier repository/hosting status statements below describe the pre-deployment review.
+
 Updated: September 24, 2026. Independent first release implemented locally; hosting and live provider validation pending.
 
 Repository: [ericfowler-dev/PSI-88L](https://github.com/ericfowler-dev/PSI-88L). The local remote is configured; no commit or push has been made. Private manuals, logs, credentials, and retained data are excluded from Git.

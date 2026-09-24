@@ -13,7 +13,7 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: node scripts/start-disk.mjs
     healthCheckPath: /api/health
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: off
     disk:
       name: psi-88l-data
       mountPath: /var/data

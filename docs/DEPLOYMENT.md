@@ -2,7 +2,21 @@
 
 The application is committed and pushed to https://github.com/ericfowler-dev/PSI-88L. GitHub's clean Linux install, type checking, lint, tests, and build passed after repairing the npm lockfile.
 
-The user approved the self-contained Render pilot on September 24, 2026. Provisioning and live verification are in progress.
+The user approved the self-contained Render pilot on September 24, 2026. The service is live at **https://psi-88l.onrender.com**.
+
+Render service: `srv-daqfhh3ncjis739psnd0`. [Dashboard](https://dashboard.render.com/web/srv-daqfhh3ncjis739psnd0).
+
+Verified live: health and session endpoints return 200; anonymous library access returns 401; the first-administrator form renders on desktop and mobile without browser errors or horizontal overflow. Startup confirmed the required persistent mount. No live model provider has been configured.
+
+## First sign-in
+
+Open the app and create your administrator account. The initial setup token is saved in the local, Git-ignored `.data/deployment/SETUP.txt`. It is also available as `SETUP_TOKEN` in the service's Render environment settings. Use your own name, email, and password; no default administrator password has been created. Initial setup closes after the first administrator is created.
+
+After signing in, build the Library and enter your provider, exact model ID, and API key in Settings. Local development/test data has not been copied to the hosted app.
+
+## Subsequent releases
+
+Automatic deploys are disabled for this pilot. After GitHub checks pass, deploy an explicit commit using `render deploys create srv-daqfhh3ncjis739psnd0 --commit COMMIT_SHA --confirm`. Monitor the deployment and health endpoint. This is an API-created service; the checked-in Blueprint documents its configuration, but Blueprint sync has not been attached.
 
 ## Pilot configuration
 
