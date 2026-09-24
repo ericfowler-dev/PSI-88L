@@ -70,6 +70,19 @@ function Settings() {
       setBusy(false);
     }
   }
+  async function testConnection() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api<{ message: string }>("/api/settings/test", { method: "POST" });
+      setNotice(result.message);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <Shell section="settings">
       <main className="page-wrap">
@@ -118,11 +131,34 @@ function Settings() {
                     Model ID
                     <input
                       required
-                      placeholder="Model available in your API account"
+                      placeholder={
+                        form.provider === "xai" ? "grok-4.7" : "Model available in your API account"
+                      }
+                      aria-describedby="model-id-help"
                       value={form.model}
                       onChange={(e) => setForm({ ...form, model: e.target.value })}
                     />
                   </label>
+                  <p id="model-id-help" className="text-xs leading-5 text-muted">
+                    Enter the model ID from your provider's API account. PSI-88L is your workspace
+                    name and cannot be used as a model ID.
+                    {form.provider === "xai" && (
+                      <>
+                        {" "}
+                        For Grok, an example is <code>grok-4.7</code>. Check access in the{" "}
+                        <a
+                          href="https://console.x.ai"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-signal underline"
+                        >
+                          xAI API console
+                        </a>
+                        . Your Grok project's instructions and files are not automatically imported;
+                        this app uses the knowledge published in your Library.
+                      </>
+                    )}
+                  </p>
                   {form.provider === "compatible" && (
                     <label className="field-label">
                       API base URL
@@ -152,6 +188,14 @@ function Settings() {
                   <button disabled={busy} className="btn-primary">
                     {busy ? "Saving…" : "Save connection"}
                   </button>
+                  <button
+                    type="button"
+                    disabled={busy || !data?.ai.configured}
+                    className="btn-secondary ml-2"
+                    onClick={() => void testConnection()}
+                  >
+                    Check saved connection
+                  </button>
                   <p className="text-xs text-muted">
                     Changing providers or endpoints clears the stored key unless you enter a new
                     one.
@@ -159,7 +203,7 @@ function Settings() {
                 </form>
                 {data?.ai.configured && (
                   <p className="mt-5 flex items-center gap-2 text-sm text-signal">
-                    <CheckCircle2 className="size-4" /> Connection configured · {data.ai.model}
+                    <CheckCircle2 className="size-4" /> Connection saved · {data.ai.model}
                   </p>
                 )}
               </section>

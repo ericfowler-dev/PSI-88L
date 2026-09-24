@@ -18,6 +18,8 @@ export type Document = {
   revision: number;
   warnings: string[];
   error: string | null;
+  processed_pages: number;
+  total_pages: number;
   created_at: string;
   updated_at: string;
   chunk_count?: number;
@@ -129,9 +131,16 @@ export async function updateDocument(id: string, body: Record<string, unknown>, 
       await query<Document>("select * from documents where id=$1 for update", [id])
     )[0];
     check(
-      current && current.status !== "deleted" && current.revision === Number(body.revision),
+      current &&
+        !["deleted", "queued", "processing"].includes(current.status) &&
+        current.revision === Number(body.revision),
       409,
       "This source has changed. Reload before saving.",
+    );
+    check(
+      current.status !== "failed",
+      409,
+      "Retry processing before reviewing or publishing this source.",
     );
     let revision = current.revision;
     if (body.content !== undefined) {
@@ -168,7 +177,7 @@ export async function updateDocument(id: string, body: Record<string, unknown>, 
       );
     }
     await query(
-      "update documents set title=$2,source_note=$3,revision=$4,status=$5,updated_at=now() where id=$1",
+      "update documents set title=$2,source_note=$3,revision=$4,status=$5,error=null,updated_at=now() where id=$1",
       [id, title, sourceNote, revision, publish ? "published" : "review"],
     );
   });

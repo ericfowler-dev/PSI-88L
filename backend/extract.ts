@@ -109,10 +109,20 @@ export function splitPassages(content: string, prefix = ""): Passage[] {
 export async function extract(
   filename: string,
   bytes: Buffer,
-): Promise<{ passages: Passage[]; warnings: string[] }> {
+  batch?: { startPage: number; maxPages: number; maxOcrPages: number },
+): Promise<{
+  passages: Passage[];
+  warnings: string[];
+  processedPages: number;
+  totalPages: number;
+  complete: boolean;
+}> {
   const mime = validateFile(filename, bytes);
   const warnings: string[] = [];
   let passages: Passage[] = [];
+  let processedPages = 0;
+  let totalPages = 0;
+  let complete = true;
   let ocrWorker: Awaited<ReturnType<typeof import("tesseract.js").createWorker>> | undefined;
   async function ocr(image: Buffer) {
     const cachePath = process.env.OCR_CACHE_DIR || `${dataDir()}/ocr`;
@@ -134,21 +144,25 @@ export async function extract(
     if (mime === "application/pdf") {
       const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
       const task = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
-      const pdf = await task.promise;
       try {
-        check(pdf.numPages <= 200, 413, "Split PDFs longer than 200 pages into smaller documents.");
+        const pdf = await task.promise;
+        totalPages = pdf.numPages;
+        const startPage = batch?.startPage ?? 1;
+        check(startPage >= 1 && startPage <= totalPages, 400, "Invalid PDF processing checkpoint.");
         let ocrPages = 0;
-        for (let n = 1; n <= pdf.numPages; n++) {
+        let characters = 0;
+        for (
+          let n = startPage;
+          n <= Math.min(pdf.numPages, startPage + (batch?.maxPages ?? pdf.numPages) - 1);
+          n++
+        ) {
           const page = await pdf.getPage(n);
           const content = await page.getTextContent();
           let value = content.items
             .map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : " ") : ""))
             .join("");
           if (value.trim().length < 30) {
-            if (++ocrPages > 20)
-              throw new Error(
-                "This document needs OCR on more than 20 pages. Split it into smaller PDFs.",
-              );
+            ocrPages++;
             const { createCanvas } = await import("@napi-rs/canvas");
             const viewport = page.getViewport({ scale: 1.5 });
             check(
@@ -167,7 +181,12 @@ export async function extract(
           }
           passages.push(...splitPassages(value, `Page ${n}`));
           page.cleanup();
+          processedPages = n;
+          characters += value.length;
+          // Checkpoint before accumulating a whole manual or a long OCR run.
+          if (batch && (ocrPages >= batch.maxOcrPages || characters >= 500_000)) break;
         }
+        complete = processedPages === totalPages;
         warnings.push(
           "PDF text and OCR do not fully interpret diagrams. Review the original figures when relevant.",
         );
@@ -189,15 +208,15 @@ export async function extract(
       warnings.push("DOCX extraction includes text; embedded pictures are not interpreted.");
     } else passages = splitPassages(decodeText(bytes));
     check(
-      passages.reduce((n, p) => n + p.content.length, 0) <= 1_000_000,
+      mime === "application/pdf" || passages.reduce((n, p) => n + p.content.length, 0) <= 1_000_000,
       413,
       "Extracted content exceeds one million characters. Split this document.",
     );
-    if (!passages.length)
+    if (!passages.length && !batch)
       warnings.push(
         "No readable text was found. Add a reviewed transcription or description before publication.",
       );
-    return { passages, warnings: [...new Set(warnings)] };
+    return { passages, warnings: [...new Set(warnings)], processedPages, totalPages, complete };
   } finally {
     if (ocrWorker) await ocrWorker.terminate();
   }

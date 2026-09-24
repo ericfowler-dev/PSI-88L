@@ -14,7 +14,7 @@ export function Shell({
   const { user, logout } = useSession();
   return (
     <div className={lock ? "flex h-dvh flex-col overflow-hidden" : "flex min-h-dvh flex-col"}>
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line bg-panel px-4 py-3 sm:px-6">
+      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line bg-panel px-4 py-3 sm:px-6">
         <Link to="/" className="flex min-h-11 items-center gap-3">
           <BookOpen className="size-7 text-signal" />
           <span>

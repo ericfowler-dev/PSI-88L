@@ -41,6 +41,7 @@ function Library() {
   const [newNote, setNewNote] = useState(false);
   const [note, setNote] = useState({ title: "", sourceNote: "", content: "" });
   const [editing, setEditing] = useState(false);
+  const [visiblePassages, setVisiblePassages] = useState(50);
   const [reviewedText, setReviewedText] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -93,6 +94,7 @@ function Library() {
   }, [search.document]);
   useEffect(() => {
     setEditing(false);
+    setVisiblePassages(50);
     setDetail(null);
     if (selected) void load(selected).catch((e) => setError(e.message));
   }, [selected, load]);
@@ -160,6 +162,10 @@ function Library() {
   }
   async function update(publish: boolean) {
     if (!detail) return;
+    if (editing && (!reviewedText.trim() || reviewedText.length > 500_000)) {
+      setError("Enter reviewed text before saving (up to 500,000 characters).");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -229,6 +235,9 @@ function Library() {
     }
   }
   const doc = detail?.document;
+  const canReplaceText =
+    (detail?.chunks.reduce((size, chunk) => size + chunk.content.length + 2, 0) || 0) <= 500_000;
+  const invalidReview = editing && (!reviewedText.trim() || reviewedText.length > 500_000);
   return (
     <Shell section="library">
       <main className="page-wrap">
@@ -436,6 +445,8 @@ function Library() {
                 {["queued", "processing"].includes(doc.status) && (
                   <p role="status" className="notice-box mt-5">
                     {doc.status === "queued" ? "Queued for extraction." : "Reading this source…"}{" "}
+                    {doc.total_pages > 0 &&
+                      `Processed ${doc.processed_pages} of ${doc.total_pages} pages. `}
                     You can leave this page; the original is retained.
                   </p>
                 )}
@@ -447,6 +458,8 @@ function Library() {
                         disabled={busy}
                         className="btn-secondary mt-3"
                         onClick={() => {
+                          setError("");
+                          setEditing(false);
                           void api(`/api/knowledge/${doc.id}/retry`, { method: "POST" })
                             .then(() => load(doc.id))
                             .catch((e) => setError(e.message));
@@ -472,7 +485,8 @@ function Library() {
                     Extracted evidence · {detail.chunks.length} passages
                   </h3>
                   {canEdit &&
-                    !["queued", "processing"].includes(doc.status) &&
+                    !["queued", "processing", "failed"].includes(doc.status) &&
+                    canReplaceText &&
                     detail.revision === doc.revision && (
                       <button
                         className="btn-secondary"
@@ -485,11 +499,18 @@ function Library() {
                       </button>
                     )}
                 </div>
+                {!canReplaceText && (
+                  <p className="mt-3 text-xs text-muted">
+                    This manual is too long for whole-document text editing. Review and publish the
+                    extracted passages, or add a separate technical note for corrections.
+                  </p>
+                )}
                 {editing ? (
                   <label className="field-label mt-4">
                     Reviewed transcription
                     <textarea
                       rows={15}
+                      maxLength={500_000}
                       className="font-mono text-sm"
                       value={reviewedText}
                       onChange={(e) => setReviewedText(e.target.value)}
@@ -501,7 +522,7 @@ function Library() {
                   </label>
                 ) : (
                   <div className="mt-4 max-h-96 space-y-5 overflow-y-auto pr-2">
-                    {detail.chunks.map((c) => (
+                    {detail.chunks.slice(0, visiblePassages).map((c) => (
                       <article key={c.id} className="rounded-lg border border-line bg-bg p-4">
                         <p className="mb-3 font-mono text-xs text-signal">{c.locator}</p>
                         <div className="text-sm text-muted">
@@ -509,10 +530,19 @@ function Library() {
                         </div>
                       </article>
                     ))}
+                    {detail.chunks.length > visiblePassages && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setVisiblePassages((count) => count + 50)}
+                      >
+                        Show more passages ({visiblePassages} of {detail.chunks.length})
+                      </button>
+                    )}
                     {!detail.chunks.length && !["queued", "processing"].includes(doc.status) && (
                       <p className="text-sm text-muted">
-                        No text extracted. Add a transcription or a reviewed description to make
-                        this source searchable.
+                        {doc.status === "failed"
+                          ? "Processing did not finish. Retry the retained original; no re-upload is needed."
+                          : "No text extracted. Add a transcription or a reviewed description to make this source searchable."}
                       </p>
                     )}
                   </div>
@@ -536,7 +566,13 @@ function Library() {
                       <div className="flex flex-wrap gap-2">
                         {!doc.case_id && (
                           <button
-                            disabled={busy || !acknowledged}
+                            disabled={
+                              busy ||
+                              !acknowledged ||
+                              invalidReview ||
+                              doc.status === "failed" ||
+                              (!editing && !detail.chunks.length)
+                            }
                             className="btn-primary"
                             onClick={() => void update(true)}
                           >
@@ -544,7 +580,7 @@ function Library() {
                           </button>
                         )}
                         <button
-                          disabled={busy}
+                          disabled={busy || invalidReview || doc.status === "failed"}
                           className="btn-secondary"
                           onClick={() => void update(false)}
                         >

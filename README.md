@@ -83,7 +83,8 @@ Run `npm run validate:blueprint` to check hosting configuration against Render's
 ## Current limits
 
 - 20 MB per upload; the interface submits up to five files at a time.
-- PDFs: up to 200 pages, with at most 20 scanned pages requiring OCR per document. One million extracted characters maximum.
+- PDFs run in resumable batches of up to 25 pages or two OCR pages, with progress and original page references retained. There is no 200-page, 20-scanned-page, or one-million-character total PDF limit. The 20 MB upload and per-page rendering safeguards still apply; large scanned manuals take longer.
+- Other formats: one million extracted characters maximum. Whole-document transcription editing and pasted notes: 500,000 characters. Larger PDFs can be reviewed and published without rewriting their text; use a separate technical note for corrections.
 - OCR is English and may misread values. Review technical numbers and units against originals. Diagram interpretation is not automatic for PDF pages.
 - DOCX extraction reads text; embedded images are not separately analyzed. CSV/JSON/logs are searchable text, not a time-series analytics engine.
 - Photo descriptions require a compatible vision model; automatic OCR runs independently of the AI provider.
@@ -95,6 +96,8 @@ Run `npm run validate:blueprint` to check hosting configuration against Render's
 ## Documentation
 
 - [API reference](docs/api.md)
+- [AI connection setup](docs/ai-connection-setup.md)
+- [Large-manual processing and recovery](docs/large-manual-processing.md)
 - [Changelog](CHANGELOG.md)
 - [Upload and retained-knowledge requirements](docs/file-uploads-and-retained-knowledge.md)
 - [Architecture and migration history](docs/independent-hosting-and-learning.md)

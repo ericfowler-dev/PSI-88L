@@ -484,6 +484,173 @@ test("persistent knowledge application and protected API", async (t) => {
       globalThis.fetch = originalFetch;
     }
   });
+  await t.test(
+    "large manuals checkpoint, resume, and retain all page citations without early publication",
+    async () => {
+      const pdf = await PDFDocument.create();
+      const font = await pdf.embedFont(StandardFonts.Helvetica);
+      for (let n = 1; n <= 205; n++) {
+        const page = pdf.addPage();
+        page.drawText(
+          `Manual page ${n} inspection record with retained technical evidence.\n`.repeat(90),
+          { x: 20, y: 740, size: 6, lineHeight: 7, font },
+        );
+        if (n === 205)
+          page.drawText("FINALMANUALMARKER diagnostic reference", {
+            x: 20,
+            y: 50,
+            size: 10,
+            font,
+          });
+      }
+      const original = Buffer.from(await pdf.save());
+      const form = new FormData();
+      form.append(
+        "file",
+        new Blob([new Uint8Array(original)], { type: "application/pdf" }),
+        "large-manual.pdf",
+      );
+      const uploaded = await ok(
+        await handleAPI(
+          new Request("http://localhost:8080/api/knowledge/upload", {
+            method: "POST",
+            headers: { cookie },
+            body: form,
+          }),
+        ),
+      );
+      const id = uploaded.document.id;
+      await processNextJob();
+      let detail = await ok(await request(`/api/knowledge/${id}`));
+      assert.equal(detail.document.status, "processing");
+      assert.equal(detail.document.processed_pages, 25);
+      assert.equal(detail.document.total_pages, 205);
+      assert.equal(
+        (
+          await request(`/api/knowledge/${id}`, "PATCH", {
+            revision: 1,
+            publish: true,
+            acknowledged: true,
+          })
+        ).status,
+        409,
+      );
+      const firstChunk = detail.chunks[0].id;
+      // A crashed worker's expired lease must resume after the committed checkpoint.
+      await (
+        await database()
+      ).query(
+        "update ingestion_jobs set state='processing',lease_until=now()-interval '1 minute',lease_token='old-worker',attempts=1 where document_id=$1",
+        [id],
+      );
+      await closeDatabase();
+      await processNextJob();
+      detail = await ok(await request(`/api/knowledge/${id}`));
+      assert.equal(detail.document.processed_pages, 50);
+      assert.equal(detail.chunks[0].id, firstChunk);
+      await (
+        await database()
+      ).query("update ingestion_jobs set state='failed' where document_id=$1", [id]);
+      await (
+        await database()
+      ).query("update documents set status='failed',error='interrupted fixture' where id=$1", [id]);
+      assert.equal(
+        (
+          await request(`/api/knowledge/${id}`, "PATCH", {
+            revision: 1,
+            publish: true,
+            acknowledged: true,
+          })
+        ).status,
+        409,
+      );
+      await ok(await request(`/api/knowledge/${id}/retry`, "POST"));
+      for (let batch = 0; batch < 7; batch++) await processNextJob();
+      detail = await ok(await request(`/api/knowledge/${id}`));
+      assert.equal(detail.document.status, "review");
+      assert.equal(detail.document.processed_pages, 205);
+      assert.equal(detail.chunks[0].id, firstChunk);
+      assert.ok(
+        detail.chunks.reduce((size: number, c: { content: string }) => size + c.content.length, 0) >
+          1_000_000,
+      );
+      assert.equal(
+        new Set(detail.chunks.map((c: { ordinal: number }) => c.ordinal)).size,
+        detail.chunks.length,
+      );
+      assert.ok(detail.chunks.at(-1).locator.startsWith("Page 205"));
+      assert.equal(
+        (
+          await ok(
+            await request("/api/knowledge/search", "POST", { question: "FINALMANUALMARKER" }),
+          )
+        ).sources.length,
+        0,
+      );
+      await ok(
+        await request(`/api/knowledge/${id}`, "PATCH", {
+          revision: 1,
+          publish: true,
+          acknowledged: true,
+        }),
+      );
+      const found = await ok(
+        await request("/api/knowledge/search", "POST", { question: "FINALMANUALMARKER" }),
+      );
+      assert.ok(found.sources.some((s: { locator: string }) => s.locator.startsWith("Page 205")));
+      assert.deepEqual(
+        Buffer.from(await (await request(`/api/knowledge/${id}/download`)).arrayBuffer()),
+        original,
+      );
+    },
+  );
+  await t.test(
+    "checks saved API credentials and model IDs without generating an answer",
+    async () => {
+      assert.equal(
+        (await request("/api/settings/test", "POST", undefined, readerCookie)).status,
+        403,
+      );
+      const invalid = await request("/api/settings", "PUT", { provider: "xai", model: "PSI-88L" });
+      assert.equal(invalid.status, 400);
+      assert.match((await invalid.json()).error, /workspace name/);
+      await ok(
+        await request("/api/settings", "PUT", {
+          provider: "xai",
+          model: "grok-4.7",
+          apiKey: "test-xai-secret",
+        }),
+      );
+      const originalFetch = globalThis.fetch;
+      let providerStatus = 200;
+      let listed = true;
+      try {
+        globalThis.fetch = async (input, init) => {
+          assert.equal(String(input), "https://api.x.ai/v1/models");
+          assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-xai-secret");
+          assert.equal(init?.body, undefined);
+          return Response.json(
+            { data: [{ id: listed ? "grok-4.7" : "another-model" }] },
+            { status: providerStatus },
+          );
+        };
+        const connected = await ok(await request("/api/settings/test", "POST"));
+        assert.match(connected.message, /grok-4.7 is listed/);
+        assert.ok(!JSON.stringify(connected).includes("test-xai-secret"));
+        listed = false;
+        const missing = await request("/api/settings/test", "POST");
+        assert.equal(missing.status, 400);
+        assert.match((await missing.json()).error, /was not listed/);
+        providerStatus = 401;
+        assert.match(
+          (await (await request("/api/settings/test", "POST")).json()).error,
+          /API key and model access/,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  );
   await t.test("removal excludes content from retrieval", async () => {
     await ok(await request(`/api/knowledge/${documentId}`, "DELETE"));
     assert.equal((await request(`/api/knowledge/${documentId}/download`)).status, 404);
@@ -577,6 +744,27 @@ test("file extraction and partial-stream rendering", async (t) => {
       const scanned = await extract("scanned.pdf", Buffer.from(await pdf.save()));
       assert.ok(scanned.passages.some((p) => /QUARTZ/i.test(p.content)));
       assert.ok(scanned.warnings.some((warning) => warning.includes("Page 1 was read using OCR")));
+      // A manual with more than 20 scanned pages is processed across bounded OCR batches.
+      for (let n = 1; n < 21; n++)
+        pdf.addPage([1000, 220]).drawImage(photo, { x: 0, y: 0, width: 1000, height: 220 });
+      const manualBytes = Buffer.from(await pdf.save());
+      const first = await extract("scanned-manual.pdf", manualBytes, {
+        startPage: 1,
+        maxPages: 25,
+        maxOcrPages: 2,
+      });
+      assert.equal(first.processedPages, 2);
+      assert.equal(first.totalPages, 21);
+      assert.equal(first.complete, false);
+      const last = await extract("scanned-manual.pdf", manualBytes, {
+        startPage: 21,
+        maxPages: 25,
+        maxOcrPages: 2,
+      });
+      assert.equal(last.complete, true);
+      assert.ok(
+        last.passages.some((p) => p.locator.startsWith("Page 21") && /QUARTZ/i.test(p.content)),
+      );
     },
   );
 });

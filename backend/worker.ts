@@ -51,8 +51,15 @@ export async function processNextJob(): Promise<boolean> {
   heartbeat.unref();
   try {
     const doc = (
-      await db.query<{ filename: string; storage_key: string; status: string; revision: number }>(
-        "select filename,storage_key,status,revision from documents where id=$1",
+      await db.query<{
+        filename: string;
+        storage_key: string;
+        status: string;
+        revision: number;
+        processed_pages: number;
+        warnings: string[];
+      }>(
+        "select filename,storage_key,status,revision,processed_pages,warnings from documents where id=$1",
         [job.document_id],
       )
     )[0];
@@ -61,34 +68,61 @@ export async function processNextJob(): Promise<boolean> {
       throw new Error(
         "Processing stopped after repeated worker interruptions. Review the file and retry.",
       );
-    const result = await extract(doc.filename, await readStoredFile(doc.storage_key));
+    const result = await extract(doc.filename, await readStoredFile(doc.storage_key), {
+      startPage: doc.processed_pages + 1,
+      maxPages: 25,
+      maxOcrPages: 2,
+    });
     await db.transaction(async (query) => {
       const current = (
         await query<{ status: string }>("select status from documents where id=$1 for update", [
           job.document_id,
         ])
       )[0];
-      const owned = await query("select id from ingestion_jobs where id=$1 and lease_token=$2", [
-        job.id,
-        token,
-      ]);
+      const owned = await query(
+        "select id from ingestion_jobs where id=$1 and lease_token=$2 for update",
+        [job.id, token],
+      );
       if (!owned.length || current?.status === "deleted") return;
-      await query("delete from document_chunks where document_id=$1 and revision=$2", [
-        job.document_id,
-        doc.revision,
-      ]);
+      if (doc.processed_pages === 0)
+        await query("delete from document_chunks where document_id=$1 and revision=$2", [
+          job.document_id,
+          doc.revision,
+        ]);
+      const [{ count }] = await query<{ count: number }>(
+        "select count(*)::int as count from document_chunks where document_id=$1 and revision=$2",
+        [job.document_id, doc.revision],
+      );
       for (const [ordinal, passage] of result.passages.entries())
         await query(
           "insert into document_chunks(id,document_id,revision,ordinal,locator,content) values($1,$2,$3,$4,$5,$6)",
-          [randomUUID(), job.document_id, doc.revision, ordinal, passage.locator, passage.content],
+          [
+            randomUUID(),
+            job.document_id,
+            doc.revision,
+            count + ordinal,
+            passage.locator,
+            passage.content,
+          ],
         );
-      await query("update documents set status='review',warnings=$2,updated_at=now() where id=$1", [
-        job.document_id,
-        JSON.stringify(result.warnings),
-      ]);
+      const warnings = [...new Set([...doc.warnings, ...result.warnings])];
+      if (result.complete && count + result.passages.length === 0)
+        warnings.push(
+          "No readable text was found. Add a reviewed transcription or description before publication.",
+        );
       await query(
-        "update ingestion_jobs set state='done',lease_until=null where id=$1 and lease_token=$2",
-        [job.id, token],
+        "update documents set status=$3,warnings=$2,processed_pages=$4,total_pages=$5,updated_at=now() where id=$1",
+        [
+          job.document_id,
+          JSON.stringify(warnings),
+          result.complete ? "review" : "processing",
+          result.processedPages,
+          result.totalPages,
+        ],
+      );
+      await query(
+        "update ingestion_jobs set state=$3,attempts=0,lease_until=null,lease_token=null,created_at=now() where id=$1 and lease_token=$2",
+        [job.id, token, result.complete ? "done" : "queued"],
       );
     });
   } catch (error) {

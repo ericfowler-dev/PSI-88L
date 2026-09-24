@@ -42,6 +42,8 @@ Library upload/edit/publication requires editor or administrator access. A reade
 
 Lifecycle: `queued` → `processing` → `review` → `published`. Failed extraction sets `failed` with an actionable error. Unpublishing returns a source to `review`. Text corrections create a new revision and require publication review again.
 
+PDF metadata includes `processed_pages` and `total_pages` (zero until the first batch finishes). Extraction checkpoints and passages commit together. A retry resumes from the last completed batch using the retained original. Partial passages are not available to AI retrieval, and queued, processing, or failed sources cannot be edited or published. Large manuals remain one document with original page citations; the Library displays passages in groups of 50.
+
 Publication requires nonempty searchable passages and `acknowledged:true`. A stale revision yields HTTP 409. Duplicate file content by the same uploader in the same scope returns the existing source.
 
 ## Cases and answers
@@ -54,6 +56,8 @@ Publication requires nonempty searchable passages and `acknowledged:true`. A sta
 | POST | `/api/chat` | `{caseId,question}`; server-sent event response |
 
 The server loads history itself; clients cannot submit fabricated assistant history or substitute another user's case. Retrieval uses published library passages and ready attachments owned by the current case user. Only the retrieved evidence is added to the model context.
+
+Administrators can `POST /api/settings/test` to check the saved API connection against the provider's `/models` endpoint (10 checks per administrator per 10 minutes). It sends no documents or generation request. Success means the key was accepted and the model was listed; it does not prove generation capability, billing availability, or vision support. Compatible providers that omit model listing must be verified in their own console.
 
 SSE frames contain JSON after `data:` and a blank line:
 

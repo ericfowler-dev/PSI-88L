@@ -26,7 +26,14 @@ import {
 } from "./knowledge.ts";
 import { deleteStoredFile, readStoredFile } from "./storage.ts";
 import { MAX_FILE_BYTES } from "./extract.ts";
-import { aiConfig, describeImage, generateAnswer, publicAIConfig, saveAIConfig } from "./ai.ts";
+import {
+  aiConfig,
+  checkAIConnection,
+  describeImage,
+  generateAnswer,
+  publicAIConfig,
+  saveAIConfig,
+} from "./ai.ts";
 import { startEmbeddedWorker } from "./worker.ts";
 
 async function upload(request: Request, user: User) {
@@ -348,9 +355,13 @@ async function dispatch(request: Request): Promise<Response> {
       if (!doc.case_id) requireEditor(user);
       check(doc.status === "failed", 409, "Only failed sources can be retried.");
       await db.transaction(async (query) => {
-        await query("update documents set status='queued',error=null where id=$1", [id]);
+        const updated = await query(
+          "update documents set status='queued',error=null where id=$1 and status='failed' returning id",
+          [id],
+        );
+        check(updated.length, 409, "This source has changed. Reload before retrying.");
         await query(
-          "update ingestion_jobs set state='queued',attempts=0,lease_until=null where document_id=$1",
+          "update ingestion_jobs set state='queued',attempts=0,lease_until=null,lease_token=null where document_id=$1",
           [id],
         );
       });
@@ -425,6 +436,11 @@ async function dispatch(request: Request): Promise<Response> {
     });
   }
   if (path === "/api/chat" && method === "POST") return chat(request, user);
+  if (path === "/api/settings/test" && method === "POST") {
+    requireAdmin(user);
+    await rateLimit(`ai-test:${user.id}`, 10, 600);
+    return Response.json(await checkAIConnection());
+  }
   if (path === "/api/settings") {
     requireAdmin(user);
     if (method === "GET")

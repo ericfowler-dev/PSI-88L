@@ -200,9 +200,6 @@ function Desk() {
       }
     }
   }
-  const sourceMessage = [...messages]
-    .reverse()
-    .find((m) => m.role === "assistant" && m.sources?.length);
   const caseList = (
     <>
       <button
@@ -241,11 +238,11 @@ function Desk() {
   return (
     <Shell section="desk" lock>
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-panel lg:flex">
+        <aside className="hidden w-52 shrink-0 flex-col border-r border-line bg-panel lg:flex">
           {caseList}
         </aside>
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex min-h-14 items-center gap-3 border-b border-line px-4">
+          <div className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-4">
             <button
               className="btn-icon lg:hidden"
               aria-label="Open cases"
@@ -260,10 +257,15 @@ function Desk() {
               {status?.published || 0} published sources
             </span>
           </div>
-          <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8">
-            <div className="mx-auto max-w-3xl space-y-7">
+          <div
+            ref={scroller}
+            role="region"
+            aria-label="Conversation"
+            className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8"
+          >
+            <div className="mx-auto w-full max-w-6xl space-y-7">
               {!messages.length ? (
-                <div className="py-5 sm:py-10">
+                <div className="py-3 sm:py-5">
                   <p className="eyebrow">EVIDENCE BEFORE ANSWERS</p>
                   <h1 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
                     Technical support, grounded in your knowledge.
@@ -332,18 +334,26 @@ function Desk() {
                           </p>
                         )}
                         {!!message.sources?.length && (
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {message.sources.map((source, index) => (
-                              <Link
-                                key={`${source.id}-${index}`}
-                                to="/library"
-                                search={{ document: source.documentId, revision: source.revision }}
-                                className="rounded-lg border border-line px-3 py-2 text-xs leading-5 text-muted hover:text-ink"
-                              >
-                                [S{index + 1}] {source.title} · {source.locator}
-                              </Link>
-                            ))}
-                          </div>
+                          <details className="mt-4 rounded-lg border border-line px-3 py-2">
+                            <summary className="cursor-pointer text-sm text-muted">
+                              View {message.sources.length} source references
+                            </summary>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                              {message.sources.map((source, index) => (
+                                <Link
+                                  key={`${source.id}-${index}`}
+                                  to="/library"
+                                  search={{
+                                    document: source.documentId,
+                                    revision: source.revision,
+                                  }}
+                                  className="rounded-lg border border-line px-3 py-2 text-xs leading-5 text-muted hover:text-ink"
+                                >
+                                  [S{index + 1}] {source.title} · {source.locator}
+                                </Link>
+                              ))}
+                            </div>
+                          </details>
                         )}
                       </>
                     )}
@@ -352,10 +362,13 @@ function Desk() {
               )}
             </div>
           </div>
-          <div className="border-t border-line px-4 py-3 sm:px-6">
-            <div className="mx-auto max-w-3xl">
+          <div className="shrink-0 border-t border-line px-4 py-3 sm:px-8">
+            <div className="mx-auto w-full max-w-6xl">
               {error && (
-                <p role="alert" className="error-box">
+                <p
+                  role="alert"
+                  className="mb-3 max-h-24 overflow-y-auto rounded-lg border border-stop px-3 py-2 text-sm text-stop"
+                >
                   {error}
                 </p>
               )}
@@ -454,37 +467,6 @@ function Desk() {
             </div>
           </div>
         </section>
-        <aside className="hidden w-64 shrink-0 flex-col overflow-y-auto border-l border-line bg-panel p-5 xl:flex">
-          <p className="eyebrow">EVIDENCE IN CONTEXT</p>
-          <h2 className="mt-4 font-medium">Retrieved sources</h2>
-          <p className="mt-2 text-xs leading-5 text-muted">
-            Passages supplied to the latest answer. Follow the answer’s citations to inspect its
-            evidence.
-          </p>
-          <div className="mt-5 space-y-3">
-            {sourceMessage?.sources.map((source, index) => (
-              <Link
-                key={`${source.id}-${index}`}
-                to="/library"
-                search={{ document: source.documentId, revision: source.revision }}
-                className="block rounded-lg border border-line p-3"
-              >
-                <p className="font-mono text-xs text-signal">
-                  S{index + 1} · REVISION {source.revision}
-                </p>
-                <p className="mt-2 text-sm">{source.title}</p>
-                <p className="mt-2 text-xs text-muted">{source.locator}</p>
-              </Link>
-            )) || (
-              <p className="text-sm leading-6 text-faint">
-                Source references appear here when a question retrieves evidence.
-              </p>
-            )}
-          </div>
-          <div className="mt-auto border-t border-line pt-5 text-xs leading-5 text-muted">
-            Published library knowledge is shared. Your case attachments remain private.
-          </div>
-        </aside>
       </div>
       {openCases && (
         <div

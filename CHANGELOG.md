@@ -2,6 +2,22 @@
 
 ## Unreleased — independent application
 
+### 2026-09-24 — Conversation layout and model setup
+
+- Removed the right-hand evidence sidebar and widened the conversation and composer. Source references remain available in expandable lists beneath answers.
+- Clarified that Model ID is a provider API identifier, not the PSI-88L Grok project name; added xAI setup guidance and targeted API error messages.
+- Added an administrator-only saved-connection check that verifies credentials and model-list availability without sending knowledge or generating an answer.
+- See [AI connection setup](docs/ai-connection-setup.md).
+
+### 2026-09-24 — Large diagnostic manuals
+
+- Replaced the 200-page PDF and 20-page OCR document limits with resumable batches (up to 25 pages or two OCR pages per job pass).
+- Save extracted passages and page checkpoints together; resume after restarts or retries without duplicating passages or losing original page citations.
+- Removed the one-million-character total limit for PDFs; retained the 20 MB upload and page-rendering safeguards.
+- Show processing progress, render long passage lists incrementally, and prevent failed/unfinished sources or empty transcriptions from being published.
+- Keep the original file intact and require review before publication. Existing failed uploads can use **Retry processing** without re-uploading.
+- See [large-manual processing](docs/large-manual-processing.md) for recovery and limits.
+
 ### 2026-09-24 — Published and deployed Render pilot
 
 - Committed and pushed the application to GitHub; fixed a clean npm 10 installation lockfile issue and verified Linux CI.

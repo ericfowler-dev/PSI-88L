@@ -109,6 +109,11 @@ test("desktop and mobile: create workspace, retain PDFs and notes, publish, sear
   await page.screenshot({ path: "screenshots/settings-desktop.png", fullPage: true });
   let evidence = "";
   const provider = createServer(async (request, response) => {
+    if (request.url === "/v1/models") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "browser-verification-model" }] }));
+      return;
+    }
     let raw = "";
     for await (const chunk of request) raw += chunk;
     evidence = JSON.parse(raw).messages[0].content;
@@ -127,10 +132,23 @@ test("desktop and mobile: create workspace, retain PDFs and notes, publish, sear
     await page.getByLabel("API key", { exact: true }).fill("browser-verification-key");
     await page.getByRole("button", { name: "Save connection" }).click();
     await expect(page.getByText(/Connection settings saved/)).toBeVisible();
+    await page.getByRole("button", { name: "Check saved connection" }).click();
+    await expect(
+      page.getByText(/API key accepted and browser-verification-model is listed/),
+    ).toBeVisible();
     await page.getByRole("link", { name: "Desk", exact: true }).click();
     await page.getByLabel("Question for the desk").fill("What is the HT commissioning marker?");
     await page.getByRole("button", { name: "Ask", exact: true }).click();
     await expect(page.getByText(/Browser verification: the retained marker/)).toBeVisible();
+    await expect(page.getByText("EVIDENCE IN CONTEXT")).toHaveCount(0);
+    const conversation = await page.getByRole("region", { name: "Conversation" }).boundingBox();
+    expect(conversation!.width).toBeGreaterThan(1440 * 0.8);
+    expect(conversation!.height).toBeGreaterThan(1000 * 0.6);
+    const references = page.locator("details").last();
+    await expect(references).not.toHaveAttribute("open");
+    await references.locator("summary").click();
+    await expect(references.getByRole("link").first()).toBeVisible();
+    await references.locator("summary").click();
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
     expect(evidence).toContain("QUARTZ-88");
     await page.reload();
@@ -150,4 +168,61 @@ test("desktop and mobile: create workspace, retain PDFs and notes, publish, sear
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
   expect(errors).toEqual([]);
+});
+
+test("long manual progress, passage preview, and failed-upload recovery controls", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("qa@example.test");
+  await page.getByLabel(/^Password/).fill("browser-test-password-123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  for (let n = 1; n <= 205; n++)
+    pdf
+      .addPage()
+      .drawText(`Diagnostic manual page ${n} retained reference for browser verification.`, {
+        x: 30,
+        y: 700,
+        size: 10,
+        font,
+      });
+  await page.getByLabel("Upload library files").setInputFiles({
+    name: `long-manual-${Date.now()}.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await pdf.save()),
+  });
+  await expect(
+    page.getByRole("status").filter({ hasText: /Processed \d+ of 205 pages/ }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish knowledge" })).toHaveCount(0);
+  await page.screenshot({ path: "screenshots/manual-progress-desktop.png", fullPage: true });
+  await expect(page.getByRole("button", { name: "Publish knowledge" })).toBeVisible({
+    timeout: 60000,
+  });
+  await expect(page.getByText("Extracted evidence · 205 passages")).toBeVisible();
+  await expect(page.locator("article")).toHaveCount(50);
+  await page.getByRole("button", { name: /Show more passages/ }).click();
+  await expect(page.locator("article")).toHaveCount(100);
+  await page.getByRole("button", { name: "Correct / add text" }).click();
+  await page.getByLabel("Reviewed transcription").fill("");
+  await expect(page.getByRole("button", { name: "Save revision for review" })).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel edit" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "screenshots/manual-review-mobile.png", fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.getByLabel("Upload library files").setInputFiles({
+    name: `broken-${Date.now()}.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.7\ninvalid fixture"),
+  });
+  await expect(page.getByRole("button", { name: "Retry processing" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Correct / add text" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save for review", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Publish knowledge" })).toBeDisabled();
+  await expect(page.getByText(/Retry the retained original; no re-upload is needed/)).toBeVisible();
 });

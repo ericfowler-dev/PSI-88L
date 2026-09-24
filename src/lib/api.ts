@@ -11,6 +11,8 @@ export type KnowledgeDocument = {
   case_id: string | null;
   warnings: string[];
   error: string | null;
+  processed_pages: number;
+  total_pages: number;
   chunk_count: number;
   updated_at: string;
 };
