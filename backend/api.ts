@@ -150,9 +150,10 @@ async function chat(request: Request, user: User) {
         let answer = "";
         let status = "complete";
         let usage = { input: 0, output: 0 };
+        let answerSources = sources;
         try {
           send({ type: "start", userId, assistantId, sources });
-          if (!sources.length) {
+          if (!sources.length && !(config.provider === "openai" && config.vectorStoreId)) {
             answer =
               "I could not find matching evidence in the published library or this case’s processed attachments. Add or publish a relevant source, or include the exact component, alarm, and measurements in your question. I cannot provide a supported technical procedure from the available material.";
             send({ type: "delta", text: answer });
@@ -161,16 +162,28 @@ async function chat(request: Request, user: User) {
               [...history, { role: "user", content: question }],
               sources,
               signal,
+              config,
             )) {
               if (event.text) {
                 answer += event.text;
                 send({ type: "delta", text: event.text });
               }
               if (event.usage) usage = event.usage;
+              if (event.sources) {
+                answerSources = [...sources, ...event.sources];
+                send({ type: "sources", sources: answerSources });
+              }
+              if (event.replaceText !== undefined) {
+                answer = event.replaceText;
+                send({ type: "replace", text: answer });
+              }
             }
             check(answer.trim(), 502, "The AI returned an empty answer.");
-            const invalid = [...answer.matchAll(/\[S(\d+)\]/g)].some(
-              (m) => Number(m[1]) < 1 || Number(m[1]) > sources.length,
+            const validCitations = new Set(
+              answerSources.map((source, index) => source.citation || `S${index + 1}`),
+            );
+            const invalid = [...answer.matchAll(/\[([SF]\d+)\]/g)].some(
+              (m) => !validCitations.has(m[1]),
             );
             if (invalid) {
               const note =
@@ -190,10 +203,11 @@ async function chat(request: Request, user: User) {
           send({ type: "error", error: message });
         } finally {
           try {
-            await db.query("update messages set content=$2,status=$3 where id=$1", [
+            await db.query("update messages set content=$2,status=$3,sources=$4 where id=$1", [
               assistantId,
               answer,
               status,
+              JSON.stringify(answerSources),
             ]);
             await db.query(
               "insert into usage_events(id,user_id,provider,model,input_tokens,output_tokens) values($1,$2,$3,$4,$5,$6)",

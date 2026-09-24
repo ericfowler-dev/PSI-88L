@@ -15,6 +15,7 @@ Repository: [ericfowler-dev/PSI-88L](https://github.com/ericfowler-dev/PSI-88L).
 - Exact SPN/FMI retrieval across common fault-code formats, a model-independent knowledge check, and labeled extraction for recognized bordered diagnostic tables.
 - Database-backed private cases, messages, case attachments, source snapshots, and streamed answers.
 - Configurable OpenAI Responses, xAI chat-completions, or a compatible chat-completions endpoint. API keys are encrypted at rest and never returned to the browser.
+- Optional OpenAI vector-store file search supplements the Library, with retained file citations and excerpts. Configure an existing store in Settings; see [OpenAI file search setup](docs/openai-file-search.md).
 - Shared database request limits and provider token-usage records.
 
 This is a single workspace, not a multi-tenant SaaS. Published library sources are shared with signed-in members; each case and its attachments belong to one user. Knowledge is retrieved at answer time, not used to automatically retrain the model.
@@ -43,7 +44,7 @@ To override configuration, copy `.env.example` to `.env`. The app does not need 
 5. Ask a relevant question in **Desk**. The app retrieves approved passages and supplies them to the configured model. Follow source links to inspect the exact retained revision.
 6. Attach a log or photo to a case for private context. Processed case attachments can inform that case without being published to the shared library.
 
-If no relevant source is found, the desk reports the evidence gap instead of asking the model to invent a technical procedure. Citation identifiers are checked for invalid references; this does not prove every generated claim is correct. Qualified review remains necessary.
+Without a connected OpenAI vector store, the Desk reports an evidence gap when local retrieval finds nothing. With a store connected, it also searches the store through OpenAI file search. The model is instructed to report remaining evidence gaps. Citation identifiers are checked for invalid references; this does not prove every generated claim is correct. Qualified review remains necessary.
 
 Use **Check knowledge** in Desk or Library to inspect what retrieval supplies before asking the AI. PDF pages and searchable passages are different counts; inspect page progress and the retained original to check completeness. See [knowledge verification](docs/knowledge-verification.md) for diagnostic-code examples and re-extraction guidance.
 

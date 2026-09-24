@@ -15,13 +15,15 @@ Authentication currently uses an HTTP-only, SameSite=Lax session cookie. Sign in
 | POST | `/api/logout` | Revokes session and clears cookie |
 | GET | `/api/status` | Published-source count, processing count, AI configuration availability |
 | GET | `/api/settings` | Administrator only; redacted AI configuration, storage/worker mode, token usage |
-| PUT | `/api/settings` | Administrator only; `{provider,model,baseUrl?,apiKey?,clearKey?}` |
+| PUT | `/api/settings` | Administrator only; `{provider,model,baseUrl?,apiKey?,clearKey?,vectorStoreId?}` |
 | GET | `/api/users` | Administrator only; workspace members |
 | POST | `/api/users` | Administrator only; `{name,email,password,role}` where role is `admin`, `editor`, or `reader` |
 
 Providers: `openai` uses Responses; `xai` uses xAI chat completions; `compatible` uses an administrator-selected HTTPS chat-completions endpoint. `baseUrl` must end at the provider's API prefix, such as `/v1`, not `/chat/completions`. Local HTTP endpoints require the explicit server setting `ALLOW_LOCAL_AI=true`. Blank keys preserve a stored key only for the same provider and endpoint. Clearing a stored key does not erase a credential supplied by the host environment.
 
 ## Knowledge
+
+Optional `vectorStoreId` is an existing `vs_...` OpenAI store ID; blank disables file search and changing providers clears it. It is used only with the OpenAI Responses provider. Settings connection checks also fetch the store's metadata and require at least one completed file. No file transfer or automatic Library synchronization occurs. See [file search setup](openai-file-search.md).
 
 | Method | Endpoint | Request / result |
 | --- | --- | --- |
@@ -78,6 +80,8 @@ data: {"type":"done","status":"complete"}
 ```
 
 Provider failures produce an `error` event followed by `done` with `status:"error"`; partial text is retained. Cancelling the response aborts the upstream request. Re-read the case to get its final persisted status. There is at most one active answer per case.
+
+OpenAI file search can additionally emit `sources` events containing the full updated source list, and a `replace` event with the final answer text after native file citations have been converted to `[F#]` labels. Clients must replace, not append, `replace.text`. External sources have `external:{provider:"openai",fileId}`, `citation:"F1"`, empty `documentId`, revision zero, and a retained excerpt when returned. They must not be linked to Library endpoints. Case retrieval returns the same retained sources. The knowledge search endpoint remains local-only.
 
 Source fields: `id` (passage ID), `documentId`, `title`, `filename`, `revision`, `locator`, and `content`. `[S1]` maps to the first supplied source, `[S2]` to the second, etc. These are retrieved evidence candidates; citation validation does not guarantee factual correctness.
 

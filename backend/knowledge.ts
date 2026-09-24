@@ -35,6 +35,8 @@ export type Source = {
   content: string;
   score?: number;
   match?: "exact_code" | "spn_only" | "text";
+  citation?: string;
+  external?: { provider: "openai"; fileId: string };
 };
 export async function ownCase(id: string, user: User) {
   const row = (

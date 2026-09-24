@@ -258,13 +258,11 @@ test("upload a multi-tab workbook, review both sheets, publish and retrieve the 
     ["SAPPHIRE_BROWSER_TWO", 2],
   ]);
   const filename = `workbook-${Date.now()}.xlsx`;
-  await page
-    .getByLabel("Upload library files")
-    .setInputFiles({
-      name: filename,
-      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
-    });
+  await page.getByLabel("Upload library files").setInputFiles({
+    name: filename,
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
+  });
   await expect(page.getByRole("button", { name: "Publish knowledge" })).toBeVisible();
   await expect(
     page.getByText('Worksheet "Fault table": 2 nonempty rows extracted.', { exact: true }),
@@ -349,4 +347,85 @@ test("long manual progress, passage preview, and failed-upload recovery controls
   await expect(page.getByRole("button", { name: "Save for review", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Publish knowledge" })).toBeDisabled();
   await expect(page.getByText(/Retry the retained original; no re-upload is needed/)).toBeVisible();
+});
+
+test("OpenAI vector-store settings and streamed remote-citation rendering", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("qa@example.test");
+  await page.getByLabel(/^Password/).fill("browser-test-password-123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("combobox", { name: "Provider", exact: true }).selectOption("openai");
+  await page.getByLabel("Model ID").fill("gpt-4.1");
+  await page.getByLabel("OpenAI vector store ID (optional)").fill("vs_browserfixture");
+  await page.getByLabel("API key", { exact: true }).fill("test-browser-openai-key");
+  await page.getByRole("button", { name: "Save connection" }).click();
+  await expect(page.getByText(/Connection settings saved/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("OpenAI vector store ID (optional)")).toHaveValue(
+    "vs_browserfixture",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "screenshots/vector-settings-mobile.png", fullPage: true });
+  const created = await page.request.post("/api/cases");
+  const testCase = await created.json();
+  const source = {
+    id: "openai:file-browser",
+    documentId: "",
+    title: "Remote fixture.pdf",
+    filename: "Remote fixture.pdf",
+    revision: 0,
+    locator: "OpenAI file search",
+    content: "REMOTE_BROWSER saved excerpt, synthetic verification only.",
+    citation: "F1",
+    external: { provider: "openai", fileId: "file-browser" },
+  };
+  let messages: unknown[] = [];
+  // Browser transport fixture only; core integration tests exercise the server/provider parser.
+  await page.route(`**/api/cases/${testCase.id}`, (route) =>
+    route.fulfill({ json: { case: testCase, messages, attachments: [] } }),
+  );
+  await page.route("**/api/chat", async (route) => {
+    const question = route.request().postDataJSON().question;
+    messages = [
+      { id: "browser-user", role: "user", content: question, sources: [], status: "complete" },
+      {
+        id: "browser-answer",
+        role: "assistant",
+        content: "Remote browser answer. [F1]",
+        sources: [source],
+        status: "complete",
+      },
+    ];
+    const events = [
+      { type: "start", userId: "browser-user", assistantId: "browser-answer", sources: [] },
+      { type: "delta", text: "Remote browser answer." },
+      { type: "sources", sources: [source] },
+      { type: "replace", text: "Remote browser answer. [F1]" },
+      { type: "done", status: "complete" },
+    ];
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+    });
+  });
+  try {
+    await page.goto(`/?case=${testCase.id}`);
+    await page.getByLabel("Question for the desk").fill("REMOTE_BROWSER question");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await expect(page.getByText("Remote browser answer. [F1]", { exact: true })).toBeVisible();
+    await page.getByText("View 1 source reference", { exact: true }).click();
+    await page.locator("summary").filter({ hasText: "Remote fixture.pdf" }).click();
+    await expect(page.getByText(source.content, { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Remote fixture/ })).toHaveCount(0);
+    await page.screenshot({ path: "screenshots/vector-citation-mobile.png", fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  } finally {
+    await page.request.put("/api/settings", {
+      data: { provider: "openai", model: "not-configured", clearKey: true, vectorStoreId: "" },
+    });
+  }
 });

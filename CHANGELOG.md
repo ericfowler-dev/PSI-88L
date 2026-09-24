@@ -2,6 +2,14 @@
 
 ## Unreleased — independent application
 
+### 2026-09-24 — Optional OpenAI vector-store search
+
+- Add an administrator-configurable OpenAI vector store ID and Responses file search alongside local Library retrieval, including questions without local matches.
+- Check store access, completed file counts, and expiration through the saved-connection check. Keep the selected model configurable, including `gpt-4.1`.
+- Retain OpenAI file citations and returned excerpts with private case answers; display them separately from local Library references.
+- Preserve server-side provider error details with credential redaction so failed answers are actionable.
+- See [OpenAI file search setup](docs/openai-file-search.md). Provider integration is tested with mocked responses; live access requires the user's OpenAI credentials.
+
 ### 2026-09-24 — Excel workbooks with multiple tabs
 
 - Accept `.xlsx` in Library uploads and private case attachments; retain the original workbook and extract every worksheet with tab names, cell addresses, and row citations.

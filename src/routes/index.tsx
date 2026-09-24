@@ -207,6 +207,14 @@ function Desk() {
               ),
             );
           if (event.type === "error") setError(event.error);
+          if (event.type === "sources")
+            setMessages((old) =>
+              old.map((m) => (m.id === assistantId ? { ...m, sources: event.sources } : m)),
+            );
+          if (event.type === "replace")
+            setMessages((old) =>
+              old.map((m) => (m.id === assistantId ? { ...m, content: event.text } : m)),
+            );
           if (event.type === "done")
             setMessages((old) =>
               old.map((m) => (m.id === assistantId ? { ...m, status: event.status } : m)),
@@ -383,19 +391,37 @@ function Desk() {
                               {message.sources.length === 1 ? "reference" : "references"}
                             </summary>
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                              {message.sources.map((source, index) => (
-                                <Link
-                                  key={`${source.id}-${index}`}
-                                  to="/library"
-                                  search={{
-                                    document: source.documentId,
-                                    revision: source.revision,
-                                  }}
-                                  className="rounded-lg border border-line px-3 py-2 text-xs leading-5 text-muted hover:text-ink"
-                                >
-                                  [S{index + 1}] {source.title} · {source.locator}
-                                </Link>
-                              ))}
+                              {message.sources.map((source, index) =>
+                                source.external ? (
+                                  <details
+                                    key={source.id}
+                                    className="rounded-lg border border-line px-3 py-2 text-xs leading-5 text-muted"
+                                  >
+                                    <summary className="cursor-pointer">
+                                      [{source.citation}] {source.title} · OpenAI file search
+                                    </summary>
+                                    <p className="mt-2">
+                                      Cited from the connected OpenAI store. This file is managed in
+                                      OpenAI and is not a published Library source.
+                                    </p>
+                                    <div className="mt-2 whitespace-pre-wrap break-words">
+                                      {source.content}
+                                    </div>
+                                  </details>
+                                ) : (
+                                  <Link
+                                    key={`${source.id}-${index}`}
+                                    to="/library"
+                                    search={{
+                                      document: source.documentId,
+                                      revision: source.revision,
+                                    }}
+                                    className="rounded-lg border border-line px-3 py-2 text-xs leading-5 text-muted hover:text-ink"
+                                  >
+                                    [S{index + 1}] {source.title} · {source.locator}
+                                  </Link>
+                                ),
+                              )}
                             </div>
                           </details>
                         )}

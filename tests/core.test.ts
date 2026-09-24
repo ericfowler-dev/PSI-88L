@@ -17,6 +17,8 @@ import { searchTerms } from "../backend/knowledge.ts";
 import { faultCode, exactFaultMatch } from "../backend/diagnostics.ts";
 import { RichText } from "../src/components/rich-text.tsx";
 import { putFile, readStoredFile } from "../backend/storage.ts";
+import { OpenAIFileEvidence } from "../backend/openai-evidence.ts";
+import { providerFailure } from "../backend/ai.ts";
 process.env.DATA_DIR = `.test-data/core-${randomUUID()}`;
 process.env.SETUP_TOKEN = "integration-setup-token";
 process.env.WORKER_MODE = "external";
@@ -654,6 +656,190 @@ test("persistent knowledge application and protected API", async (t) => {
     },
   );
   await t.test(
+    "connects OpenAI file search without local matches and retains provider citations",
+    async () => {
+      const config = {
+        provider: "openai",
+        model: "gpt-4.1",
+        apiKey: "test-file-search-secret",
+        vectorStoreId: "vs_teststore",
+      };
+      assert.equal((await request("/api/settings", "PUT", config, readerCookie)).status, 403);
+      assert.equal(
+        (await request("/api/settings", "PUT", { ...config, vectorStoreId: "bad/id" })).status,
+        400,
+      );
+      await ok(await request("/api/settings", "PUT", config));
+      await closeDatabase();
+      const saved = await ok(await request("/api/settings"));
+      assert.equal(saved.ai.vectorStoreId, "vs_teststore");
+      assert.ok(!JSON.stringify(saved).includes(config.apiKey));
+      const originalFetch = globalThis.fetch;
+      let storeStatus = 200;
+      let storeState = "completed";
+      let completedFiles = 2;
+      let responses = 0;
+      let failSearch = false;
+      let failResponse = false;
+      try {
+        globalThis.fetch = async (input, init) => {
+          const url = String(input);
+          assert.equal(
+            new Headers(init?.headers).get("authorization"),
+            "Bearer test-file-search-secret",
+          );
+          if (url.endsWith("/models")) return Response.json({ data: [{ id: "gpt-4.1" }] });
+          if (url.endsWith("/vector_stores/vs_teststore"))
+            return Response.json(
+              {
+                status: storeState,
+                file_counts: { completed: completedFiles, in_progress: 1, failed: 0 },
+              },
+              { status: storeStatus },
+            );
+          assert.equal(url, "https://api.openai.com/v1/responses");
+          const payload = JSON.parse(String(init?.body));
+          assert.equal(payload.model, "gpt-4.1");
+          assert.deepEqual(payload.tools, [
+            { type: "file_search", vector_store_ids: ["vs_teststore"], max_num_results: 8 },
+          ]);
+          assert.deepEqual(payload.include, ["file_search_call.results"]);
+          assert.deepEqual(payload.tool_choice, { type: "file_search" });
+          assert.equal(payload.store, false);
+          responses++;
+          if (failResponse)
+            return new Response(
+              `data: ${JSON.stringify({ type: "response.failed", response: { error: { code: "insufficient_quota", message: "Check project billing; test-file-search-secret" } } })}\n\n`,
+            );
+          if (failSearch)
+            return new Response(
+              'data: {"type":"response.output_item.done","item":{"type":"file_search_call","status":"failed"}}\n\n',
+            );
+          const annotation = {
+            type: "file_citation",
+            file_id: "file-test88",
+            filename: "Remote diagnostic fixture.pdf",
+            index: 27,
+          };
+          const call = {
+            type: "file_search_call",
+            status: "completed",
+            results: [
+              {
+                file_id: "file-test88",
+                filename: annotation.filename,
+                text: "REMOTE_ORCHID fixture evidence; not an operational procedure.",
+              },
+            ],
+          };
+          const message = {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: "Remote fixture information.",
+                annotations: [annotation, annotation],
+              },
+            ],
+          };
+          const events = [
+            { type: "response.output_item.done", item: call },
+            { type: "response.output_text.delta", delta: "Remote fixture information." },
+            { type: "response.output_text.annotation.added", annotation },
+            { type: "response.output_item.done", item: message },
+            {
+              type: "response.completed",
+              response: { output: [call, message], usage: { input_tokens: 30, output_tokens: 10 } },
+            },
+          ];
+          return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+        };
+        assert.match(
+          (await ok(await request("/api/settings/test", "POST"))).message,
+          /2 completed files/,
+        );
+        storeStatus = 404;
+        assert.match(
+          (await (await request("/api/settings/test", "POST")).json()).error,
+          /vector store returned 404/,
+        );
+        storeStatus = 200;
+        storeState = "expired";
+        assert.match((await (await request("/api/settings/test", "POST")).json()).error, /expired/);
+        storeState = "completed";
+        completedFiles = 0;
+        assert.match(
+          (await (await request("/api/settings/test", "POST")).json()).error,
+          /no completed files/,
+        );
+        const isolated = (await ok(await request("/api/cases", "POST"))).id;
+        const result = await request("/api/chat", "POST", {
+          caseId: isolated,
+          question: "REMOTE_ORCHID",
+        });
+        const streamed = await result.text();
+        assert.match(streamed, /"type":"replace"/);
+        assert.match(streamed, /\[F1\]/);
+        assert.equal(responses, 1);
+        await closeDatabase();
+        const answer = (await ok(await request(`/api/cases/${isolated}`))).messages.at(-1);
+        assert.equal(answer.status, "complete");
+        assert.equal(answer.sources.length, 1);
+        assert.equal(answer.sources[0].external.fileId, "file-test88");
+        assert.equal(answer.sources[0].citation, "F1");
+        assert.match(answer.sources[0].content, /REMOTE_ORCHID/);
+        assert.match(answer.content, /\[F1\]/);
+        assert.equal(
+          (await request(`/api/cases/${isolated}`, "GET", undefined, readerCookie)).status,
+          404,
+        );
+        failSearch = true;
+        const failed = await request("/api/chat", "POST", {
+          caseId: isolated,
+          question: "REMOTE_ORCHID again",
+        });
+        assert.match(await failed.text(), /OpenAI file search failed/);
+        assert.equal(
+          (await ok(await request(`/api/cases/${isolated}`))).messages.at(-1).status,
+          "error",
+        );
+        failResponse = true;
+        const providerFailureResponse = await request("/api/chat", "POST", {
+          caseId: isolated,
+          question: "REMOTE_ORCHID failed response",
+        });
+        const failureText = await providerFailureResponse.text();
+        assert.match(failureText, /insufficient_quota/);
+        assert.match(failureText, /Check project billing/);
+        assert.ok(!failureText.includes(config.apiKey));
+        await ok(
+          await request("/api/settings", "PUT", {
+            provider: "xai",
+            model: "test-grok",
+            apiKey: "test-xai",
+          }),
+        );
+        assert.equal((await ok(await request("/api/settings"))).ai.vectorStoreId, "");
+        await ok(await request("/api/settings", "PUT", config));
+        await ok(
+          await request("/api/settings", "PUT", {
+            provider: "openai",
+            model: "gpt-4.1",
+            vectorStoreId: "",
+          }),
+        );
+        const disabled = await request("/api/chat", "POST", {
+          caseId: (await ok(await request("/api/cases", "POST"))).id,
+          question: "REMOTE_ORCHID",
+        });
+        assert.match(await disabled.text(), /could not find matching evidence/);
+        assert.equal(responses, 3);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  );
+  await t.test(
     "retrieves exact fault pairs across shorthand, preserves FMI distinctions, and re-extracts without losing revisions",
     async () => {
       const fixtures = [
@@ -835,6 +1021,40 @@ test("persistent knowledge application and protected API", async (t) => {
   });
 });
 test("file extraction and partial-stream rendering", async (t) => {
+  await t.test("shows actionable provider failures without exposing credentials", () => {
+    const message = providerFailure(
+      { code: "invalid_api_key", message: "Rejected secretABC, sk-test123 and Bearer tokenXYZ" },
+      { provider: "openai", model: "gpt-5.4", apiKey: "secretABC" },
+      401,
+    );
+    assert.match(message, /gpt-5.4.*401.*invalid_api_key/);
+    for (const secret of ["secretABC", "sk-test123", "tokenXYZ"])
+      assert.ok(!message.includes(secret));
+  });
+  await t.test(
+    "maps native file annotations without merging local and remote citation identifiers",
+    () => {
+      const evidence = new OpenAIFileEvidence();
+      const text = evidence.finalText([
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: "Local [S1]. Remote.",
+              annotations: [
+                { type: "file_citation", file_id: "file-A", filename: "Remote.pdf", index: 19 },
+              ],
+            },
+          ],
+        },
+      ]);
+      assert.match(text!, /Local \[S1\]/);
+      assert.match(text!, /\[F1\]/);
+      assert.equal(evidence.sources()[0].documentId, "");
+      assert.match(evidence.sources()[0].content, /did not return a text excerpt/);
+    },
+  );
   await t.test(
     "extracts hidden and sparse worksheets, merged headings, and saved formula results without calculating",
     async () => {

@@ -45,8 +45,8 @@ export function KnowledgeCheck({
           <FileCheck2 className="size-5 text-signal" /> Check your knowledge
         </h2>
         <p className="mt-2 text-sm leading-6 text-muted">
-          Search the saved evidence the AI can use. No AI request or training is needed for this
-          check.
+          Search published Library evidence and ready case attachments without an AI request. A
+          connected OpenAI vector store is searched during chat, not by this local check.
         </p>
       </div>
       <form onSubmit={search} className="flex gap-2">

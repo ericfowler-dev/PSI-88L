@@ -11,6 +11,7 @@ type Config = {
   baseUrl: string;
   hasKey: boolean;
   configured: boolean;
+  vectorStoreId: string;
 };
 type SettingsData = {
   ai: Config;
@@ -23,7 +24,13 @@ function Settings() {
   const { user } = useSession();
   const [data, setData] = useState<SettingsData | null>(null);
   const [members, setMembers] = useState<User[]>([]);
-  const [form, setForm] = useState({ provider: "openai", model: "", baseUrl: "", apiKey: "" });
+  const [form, setForm] = useState({
+    provider: "openai",
+    model: "",
+    baseUrl: "",
+    apiKey: "",
+    vectorStoreId: "",
+  });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -119,7 +126,13 @@ function Settings() {
                     <select
                       value={form.provider}
                       onChange={(e) =>
-                        setForm({ ...form, provider: e.target.value, model: "", apiKey: "" })
+                        setForm({
+                          ...form,
+                          provider: e.target.value,
+                          model: "",
+                          apiKey: "",
+                          vectorStoreId: "",
+                        })
                       }
                     >
                       <option value="openai">OpenAI — Responses API</option>
@@ -170,6 +183,29 @@ function Settings() {
                         onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
                       />
                     </label>
+                  )}
+                  {form.provider === "openai" && (
+                    <div className="rounded-lg border border-line p-3 space-y-2">
+                      <label className="field-label">
+                        OpenAI vector store ID (optional)
+                        <input
+                          value={form.vectorStoreId}
+                          maxLength={100}
+                          placeholder="vs_…"
+                          onChange={(e) => setForm({ ...form, vectorStoreId: e.target.value })}
+                        />
+                      </label>
+                      <p className="text-xs leading-5 text-muted">
+                        Search an existing OpenAI knowledge store alongside the Library. Use a key
+                        with access to that store and a file-search model such as gpt-4.1. Leave
+                        blank to disable.
+                      </p>
+                      <p className="text-xs leading-5 text-muted">
+                        All workspace members can use this store through chat. Its files are managed
+                        in OpenAI and do not go through Library publication. Library uploads are not
+                        automatically copied there. OpenAI search and storage charges may apply.
+                      </p>
+                    </div>
                   )}
                   <label className="field-label">
                     API key

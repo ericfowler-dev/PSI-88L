@@ -25,6 +25,8 @@ export type Source = {
   locator: string;
   content: string;
   match?: "exact_code" | "spn_only" | "text";
+  citation?: string;
+  external?: { provider: "openai"; fileId: string };
 };
 export type Message = {
   id: string;
