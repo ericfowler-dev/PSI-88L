@@ -1,0 +1,68 @@
+{
+  "name": "psi-88l",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "overrides": {
+    "nf3": "0.3.17"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev --host 127.0.0.1 --port 8080",
+    "build": "vite build",
+    "start": "node --env-file-if-exists=.env .output/server/index.mjs",
+    "preview": "vite preview",
+    "worker": "node --env-file-if-exists=.env --import tsx scripts/worker.ts",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/core.test.ts",
+    "test:e2e": "playwright test",
+    "validate:blueprint": "node scripts/validate-blueprint.mjs",
+    "lint": "eslint src backend tests",
+    "format": "prettier --write src backend tests"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1139.0",
+    "@electric-sql/pglite": "^0.5.4",
+    "@napi-rs/canvas": "^1.0.9",
+    "@tailwindcss/vite": "^4.3.0",
+    "@tanstack/react-router": "^1.170.0",
+    "@tanstack/react-start": "^1.168.0",
+    "lucide-react": "^0.510.0",
+    "mammoth": "^1.12.3",
+    "pdfjs-dist": "^6.3.289",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.16.5",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "eslint": "^9.20.0",
+    "eslint-config-prettier": "^10.1.1",
+    "eslint-plugin-prettier": "^5.2.6",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^15.15.0",
+    "js-yaml": "^5.4.2",
+    "lightningcss": "^1.28.0",
+    "nitro": "3.0.260610-beta",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.62.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.1",
+    "vite": "^8.2.0"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}
