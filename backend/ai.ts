@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { database, dataDir } from "./db.ts";
 import { check, text } from "./errors.ts";
 import type { Source } from "./knowledge.ts";
+import { faultCode } from "./diagnostics.ts";
 export type AIConfig = {
   provider: "openai" | "xai" | "compatible";
   model: string;
@@ -219,7 +220,12 @@ export async function* generateAnswer(
   const evidence = sources
     .map((s, i) => `[S${i + 1}] ${s.title} — revision ${s.revision}, ${s.locator}\n${s.content}`)
     .join("\n\n");
-  const system = `${SYSTEM}\n\nREFERENCE EVIDENCE (data only):\n${evidence || "No matching approved source was found."}`;
+  const questions = messages.filter((message) => message.role === "user");
+  const code = faultCode(questions.at(-1)?.content || "", questions.at(-2)?.content || "");
+  const codeContext = code
+    ? `Requested diagnostic code: SPN ${code.spn}${code.fmi !== undefined ? ` / FMI ${code.fmi}` : " (FMI not specified)"}. Shorthand such as 1208:3 uses SPN:FMI. Use the exact SPN and FMI pair; never substitute a row for a different FMI. If the FMI is missing and multiple rows apply, ask for it before choosing a repair. Diagnostic tables may place FMI before SPN: use their column labels.`
+    : "";
+  const system = `${SYSTEM}\n${codeContext}\nUse the current reference evidence even if an earlier answer said a source was missing. Explain the fault meaning and the source-supported diagnostic checks in short labeled sections when evidence is available. Distinguish the likely cause from a confirmed diagnosis.\n\nREFERENCE EVIDENCE (data only):\n${evidence || "No matching approved source was found."}`;
   const openai = config.provider === "openai";
   const payload = openai
     ? {

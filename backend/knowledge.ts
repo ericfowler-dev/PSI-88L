@@ -4,6 +4,7 @@ import { audit, requireEditor, type User } from "./auth.ts";
 import { check, text } from "./errors.ts";
 import { putFile, deleteStoredFile } from "./storage.ts";
 import { validateFile, splitPassages } from "./extract.ts";
+import { faultCode, exactFaultMatch } from "./diagnostics.ts";
 export type Document = {
   id: string;
   owner_id: string;
@@ -33,6 +34,7 @@ export type Source = {
   locator: string;
   content: string;
   score?: number;
+  match?: "exact_code" | "spn_only" | "text";
 };
 export async function ownCase(id: string, user: User) {
   const row = (
@@ -232,6 +234,60 @@ export async function retrieve(
   history = "",
 ): Promise<Source[]> {
   if (caseId) await ownCase(caseId, user);
+  const code = faultCode(question, history);
+  if (code) {
+    const db = await database();
+    const candidates = await db.query<Source & { ordinal: number }>(
+      `select c.id,d.id as "documentId",d.title,d.filename,c.revision,c.ordinal,c.locator,c.content
+       from document_chunks c join documents d on d.id=c.document_id
+       where c.revision=d.revision and (d.case_id is null and d.status='published' or d.case_id=$2 and d.owner_id=$3 and d.status in ('review','published'))
+       and c.search_vector @@ to_tsquery('simple',$1)
+       order by d.updated_at desc,c.ordinal limit 200`,
+      [`${code.spn} | spn${code.spn} | '${code.spn}/':*`, caseId || null, user.id],
+    );
+    const exact = candidates.filter((row) => exactFaultMatch(row.content, code));
+    const structured = exact.filter((row) => row.locator.includes(`SPN ${code.spn} / FMI`));
+    const ranked = (structured.length ? structured : exact.length ? exact : candidates).sort(
+      (a, b) =>
+        Number(b.locator.includes(`SPN ${code.spn}`)) -
+        Number(a.locator.includes(`SPN ${code.spn}`)),
+    );
+    const selected: Source[] = [];
+    const seen = new Set<string>();
+    let size = 0;
+    for (const row of ranked) {
+      const signature = row.content.replace(/\s+/g, " ").trim();
+      if (seen.has(signature) || size + row.content.length > 16_000) continue;
+      seen.add(signature);
+      selected.push({
+        ...row,
+        match: exact.length && code.fmi !== undefined ? "exact_code" : "spn_only",
+      });
+      size += row.content.length;
+      // Legacy edited transcriptions can split a row: retain its following passage.
+      if (!row.locator.includes(`SPN ${code.spn}`)) {
+        const next = await db.query<Source>(
+          `select c.id,d.id as "documentId",d.title,d.filename,c.revision,c.locator,c.content from document_chunks c join documents d on d.id=c.document_id where c.document_id=$1 and c.revision=$2 and c.ordinal=$3`,
+          [row.documentId, row.revision, row.ordinal + 1],
+        );
+        if (
+          next[0] &&
+          (row.locator.startsWith("Reviewed transcription") ||
+            (!!/^Page \d+\b/.exec(row.locator) &&
+              /^Page \d+\b/.exec(row.locator)?.[0] === /^Page \d+\b/.exec(next[0].locator)?.[0])) &&
+          selected.length < 7 &&
+          size + next[0].content.length <= 16_000 &&
+          !seen.has(next[0].content.replace(/\s+/g, " ").trim())
+        ) {
+          selected.push({ ...next[0], match: "text" });
+          seen.add(next[0].content.replace(/\s+/g, " ").trim());
+          size += next[0].content.length;
+        }
+      }
+      if (selected.length >= 8) break;
+    }
+    return selected;
+  }
   const terms = searchTerms(question);
   const expanded = [...new Set([...terms, ...searchTerms(history).slice(0, 12)])];
   if (!expanded.length) return [];

@@ -2,6 +2,7 @@ import { extname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { check } from "./errors.ts";
 import { dataDir } from "./db.ts";
+import { diagnosticRows } from "./diagnostics.ts";
 export type Passage = { locator: string; content: string };
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 export const mimeTypes: Record<string, string> = {
@@ -142,7 +143,7 @@ export async function extract(
   }
   try {
     if (mime === "application/pdf") {
-      const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const { getDocument, OPS, Util } = await import("pdfjs-dist/legacy/build/pdf.mjs");
       const task = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
       try {
         const pdf = await task.promise;
@@ -179,7 +180,41 @@ export async function extract(
             value = await ocr(canvas.toBuffer("image/png"));
             warnings.push(`Page ${n} was read using OCR; verify technical values.`);
           }
-          passages.push(...splitPassages(value, `Page ${n}`));
+          const items = content.items.filter((item) => "str" in item);
+          const borders: number[][] = [];
+          if (items.some((item) => item.str.trim() === "Diagsmart")) {
+            const ops = await page.getOperatorList();
+            let matrix = [1, 0, 0, 1, 0, 0];
+            const stack: number[][] = [];
+            for (let i = 0; i < ops.fnArray.length; i++) {
+              const op = ops.fnArray[i],
+                args = ops.argsArray[i];
+              if (op === OPS.save) stack.push([...matrix]);
+              else if (op === OPS.restore) matrix = stack.pop() || [1, 0, 0, 1, 0, 0];
+              else if (op === OPS.transform) matrix = Util.transform(matrix, args);
+              else if (
+                op === OPS.constructPath &&
+                args[2]?.length === 4 &&
+                matrix[1] === 0 &&
+                matrix[2] === 0
+              ) {
+                const b = args[2];
+                const x1 = b[0] * matrix[0] + matrix[4],
+                  x2 = b[2] * matrix[0] + matrix[4];
+                const y1 = b[1] * matrix[3] + matrix[5],
+                  y2 = b[3] * matrix[3] + matrix[5];
+                borders.push([
+                  Math.min(x1, x2),
+                  Math.min(y1, y2),
+                  Math.max(x1, x2),
+                  Math.max(y1, y2),
+                ]);
+              }
+            }
+          }
+          const rows = diagnosticRows(items, n, borders);
+          // Keep the full page as evidence too, including any continuation text outside recognized rows.
+          passages.push(...rows, ...splitPassages(value, `Page ${n}`));
           page.cleanup();
           processedPages = n;
           characters += value.length;

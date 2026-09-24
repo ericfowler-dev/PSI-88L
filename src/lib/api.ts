@@ -24,6 +24,7 @@ export type Source = {
   revision: number;
   locator: string;
   content: string;
+  match?: "exact_code" | "spn_only" | "text";
 };
 export type Message = {
   id: string;

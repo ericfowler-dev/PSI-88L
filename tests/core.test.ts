@@ -13,6 +13,7 @@ import { database, closeDatabase } from "../backend/db.ts";
 import { processNextJob } from "../backend/worker.ts";
 import { extract, splitPassages, validateFile } from "../backend/extract.ts";
 import { searchTerms } from "../backend/knowledge.ts";
+import { faultCode, exactFaultMatch } from "../backend/diagnostics.ts";
 import { RichText } from "../src/components/rich-text.tsx";
 import { putFile, readStoredFile } from "../backend/storage.ts";
 process.env.DATA_DIR = `.test-data/core-${randomUUID()}`;
@@ -651,6 +652,103 @@ test("persistent knowledge application and protected API", async (t) => {
       }
     },
   );
+  await t.test(
+    "retrieves exact fault pairs across shorthand, preserves FMI distinctions, and re-extracts without losing revisions",
+    async () => {
+      const fixtures = [
+        {
+          title: "Generic diagnostic glossary",
+          content: "SPN FMI fault how fix troubleshooting generic reference. ".repeat(400),
+        },
+        {
+          title: "Different FMI fixture",
+          content: "SPN 1208 / FMI 4\nWRONG_FMI_ONLY synthetic example.",
+        },
+        {
+          title: "Legacy diagnostic table fixture",
+          content:
+            "Description FMI SPN Diagsmart Related parts Phenomena Fault cause Troubleshooting method\nSynthetic upper-threshold fixture\n3   1208   P0576\nTEST_EXACT_PAIR fictional verification marker. Inspect the test harness.",
+        },
+        { title: "Private unpublished code", content: "SPN 88888 / FMI 3\nDRAFT_ONLY fixture." },
+        { title: "Compact labels fixture", content: "SPN3210 FMI3\nCOMPACT_SOURCE fixture." },
+        { title: "Slash notation fixture", content: "4321/3\nSLASH_SOURCE fixture." },
+      ];
+      const ids: string[] = [];
+      for (const fixture of fixtures) {
+        const result = await ok(await request("/api/knowledge/text", "POST", fixture));
+        ids.push(result.document.id);
+        await processNextJob();
+        if (!fixture.title.startsWith("Private"))
+          await ok(
+            await request(`/api/knowledge/${result.document.id}`, "PATCH", {
+              revision: 1,
+              publish: true,
+              acknowledged: true,
+            }),
+          );
+      }
+      for (const question of [
+        "what is an SPN 1208 / FMI 3 and how do i fix it?",
+        "1208:3",
+        "1208/3",
+        "1208-3",
+        "spn1208 fmi3",
+        "SPN: 001208, FMI=03",
+        "FMI 3 for SPN 1208",
+        "1208 / FMI 3",
+        "fault code 1208 3",
+      ]) {
+        const result = await ok(await request("/api/knowledge/search", "POST", { question }));
+        assert.deepEqual(result.requestedCode, { spn: "1208", fmi: "3" }, question);
+        assert.equal(result.exactCodeMatch, true, question);
+        assert.match(result.sources[0].content, /TEST_EXACT_PAIR/, question);
+        assert.ok(
+          !result.sources.some((s: { documentId: string }) => s.documentId === ids[1]),
+          question,
+        );
+      }
+      for (const [question, marker] of [
+        ["3210:3", "COMPACT_SOURCE"],
+        ["4321:3", "SLASH_SOURCE"],
+      ]) {
+        const result = await ok(await request("/api/knowledge/search", "POST", { question }));
+        assert.equal(result.exactCodeMatch, true, question);
+        assert.ok(result.sources[0].content.includes(marker), question);
+      }
+      const different = await ok(
+        await request("/api/knowledge/search", "POST", { question: "1208:4" }),
+      );
+      assert.match(different.sources[0].content, /WRONG_FMI_ONLY/);
+      const unknown = await ok(
+        await request("/api/knowledge/search", "POST", { question: "1208:5" }),
+      );
+      assert.equal(unknown.exactCodeMatch, false);
+      assert.equal(
+        (await ok(await request("/api/knowledge/search", "POST", { question: "88888:3" }))).sources
+          .length,
+        0,
+      );
+      assert.equal(
+        (await ok(await request("/api/knowledge/search", "POST", { question: "987654:3" }))).sources
+          .length,
+        0,
+      );
+      const reprocess = await request(
+        `/api/knowledge/${ids[2]}/reprocess`,
+        "POST",
+        undefined,
+        readerCookie,
+      );
+      assert.equal(reprocess.status, 403);
+      await ok(await request(`/api/knowledge/${ids[2]}/reprocess`, "POST"));
+      const pending = await ok(await request(`/api/knowledge/${ids[2]}`));
+      assert.equal(pending.document.revision, 2);
+      assert.equal(pending.document.status, "queued");
+      assert.ok((await ok(await request(`/api/knowledge/${ids[2]}?revision=1`))).chunks.length);
+      await processNextJob();
+      assert.equal((await ok(await request(`/api/knowledge/${ids[2]}`))).document.status, "review");
+    },
+  );
   await t.test("removal excludes content from retrieval", async () => {
     await ok(await request(`/api/knowledge/${documentId}`, "DELETE"));
     assert.equal((await request(`/api/knowledge/${documentId}/download`)).status, 404);
@@ -675,6 +773,63 @@ test("persistent knowledge application and protected API", async (t) => {
   });
 });
 test("file extraction and partial-stream rendering", async (t) => {
+  await t.test("normalizes fault notation without treating dates or times as fault codes", () => {
+    for (const value of ["2026/03/12", "at 12:30 yesterday", "1208 volts", "oil pressure 3"])
+      assert.equal(faultCode(value), undefined, value);
+    assert.deepEqual(faultCode("what about FMI 4?", "1208:3"), { spn: "1208", fmi: "4" });
+    assert.equal(exactFaultMatch("3 12080 P0576", { spn: "1208", fmi: "3" }), false);
+    assert.equal(exactFaultMatch("SPN 1208 / FMI 30", { spn: "1208", fmi: "3" }), false);
+  });
+  await t.test(
+    "keeps bordered diagnostic table rows separate on pages with unequal row heights",
+    async () => {
+      const pdf = await PDFDocument.create();
+      const font = await pdf.embedFont(StandardFonts.Helvetica);
+      const page = pdf.addPage([1100, 800]);
+      const labels = [
+        "Description",
+        "FMI",
+        "SPN",
+        "Diagsmart",
+        "Related parts",
+        "Phenomena",
+        "Fault cause",
+        "Troubleshooting",
+      ];
+      const x = [20, 210, 260, 330, 430, 580, 730, 890];
+      const draw = (str: string, col: number, y: number) =>
+        page.drawText(str, { x: x[col], y, size: 10, font });
+      labels.forEach((label, col) => draw(label, col, 730));
+      for (const y of [710, 490, 430]) page.drawRectangle({ x: 10, y, width: 1080, height: 0.5 });
+      [
+        "SYNTHETIC HIGH",
+        "3",
+        "1208",
+        "P0576",
+        "TEST SENSOR",
+        "TEST SIGNAL",
+        "TEST HARNESS",
+        "CHECK ALPHA",
+      ].forEach((s, c) => draw(s, c, 600));
+      draw("LAST LINE OF TALL ROW", 7, 500);
+      [
+        "SYNTHETIC LOW",
+        "4",
+        "1208",
+        "P0578",
+        "OTHER SENSOR",
+        "OTHER SIGNAL",
+        "OTHER HARNESS",
+        "CHECK BETA",
+      ].forEach((s, c) => draw(s, c, 460));
+      const result = await extract("table-fixture.pdf", Buffer.from(await pdf.save()));
+      const exact = result.passages.find((p) => p.locator.endsWith("SPN 1208 / FMI 3"));
+      assert.ok(exact);
+      assert.match(exact.content, /CHECK ALPHA LAST LINE OF TALL ROW/);
+      assert.doesNotMatch(exact.content, /BETA|OTHER SENSOR/);
+      assert.ok(result.passages.some((p) => p.locator.endsWith("SPN 1208 / FMI 4")));
+    },
+  );
   await t.test("extracts DOCX paragraphs", async () => {
     const result = await extract("reference.docx", await readFile("tests/fixtures/reference.docx"));
     assert.match(result.passages[0].content, /COBALT-22/);

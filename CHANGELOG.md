@@ -2,6 +2,16 @@
 
 ## Unreleased — independent application
 
+### 2026-09-24 — Verifiable diagnostic retrieval and refreshed workspace
+
+- Normalize fault-code questions such as `SPN 1208 / FMI 3`, `1208:3`, `1208/3`, and `1208-3`; prioritize the exact pair and distinguish other FMIs. Retain SPN context for FMI-only follow-up questions.
+- Recognize bordered diagnostic tables with labeled columns and retain row labels, printed page references, and original page text. Existing extracted manuals also benefit from corrected retrieval without re-uploading.
+- Add **Check knowledge** to inspect the evidence available to the AI without making a model request; expose exact-code matching through the search API.
+- Show PDF page totals separately from passage counts, search within extracted evidence, open original PDFs, and optionally re-extract a retained original into a new revision requiring review.
+- Refresh the dark Desk and Library: collapsible cases, wider conversation, compact composer, clearer answer cards, responsive navigation, and expandable citations.
+- Verified the privately supplied 539-page manual locally, including the requested fault on printed page 379, notation variants, legacy extraction, and evidence in a mocked provider request. No private manual text is committed and no live provider answer is claimed.
+- See [knowledge verification](docs/knowledge-verification.md).
+
 ### 2026-09-24 — Conversation layout and model setup
 
 - Removed the right-hand evidence sidebar and widened the conversation and composer. Source references remain available in expandable lists beneath answers.

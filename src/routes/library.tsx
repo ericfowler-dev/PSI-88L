@@ -14,6 +14,7 @@ import { Shell } from "@/components/shell";
 import { useSession } from "@/components/session";
 import { api, bytes, changed, SUPPORTED, uploadFile, type KnowledgeDocument } from "@/lib/api";
 import { RichText } from "@/components/rich-text";
+import { KnowledgeCheck } from "@/components/knowledge-check";
 export const Route = createFileRoute("/library")({
   validateSearch: (search: Record<string, unknown>) => ({
     document: typeof search.document === "string" ? search.document : "",
@@ -42,6 +43,8 @@ function Library() {
   const [note, setNote] = useState({ title: "", sourceNote: "", content: "" });
   const [editing, setEditing] = useState(false);
   const [visiblePassages, setVisiblePassages] = useState(50);
+  const [passageQuery, setPassageQuery] = useState("");
+  const [confirmReprocess, setConfirmReprocess] = useState(false);
   const [reviewedText, setReviewedText] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -95,6 +98,8 @@ function Library() {
   useEffect(() => {
     setEditing(false);
     setVisiblePassages(50);
+    setPassageQuery("");
+    setConfirmReprocess(false);
     setDetail(null);
     if (selected) void load(selected).catch((e) => setError(e.message));
   }, [selected, load]);
@@ -235,6 +240,14 @@ function Library() {
     }
   }
   const doc = detail?.document;
+  const filteredPassages =
+    detail?.chunks.filter((chunk) =>
+      passageQuery
+        .toLowerCase()
+        .trim()
+        .split(/\s+/)
+        .every((term) => `${chunk.locator} ${chunk.content}`.toLowerCase().includes(term)),
+    ) || [];
   const canReplaceText =
     (detail?.chunks.reduce((size, chunk) => size + chunk.content.length + 2, 0) || 0) <= 500_000;
   const invalidReview = editing && (!reviewedText.trim() || reviewedText.length > 500_000);
@@ -292,6 +305,14 @@ function Library() {
             {notice}
           </p>
         )}
+        <details className="surface mb-5 p-4 sm:p-5">
+          <summary className="cursor-pointer text-sm font-semibold text-signal">
+            Verify what the AI can find in your knowledge
+          </summary>
+          <div className="mt-4">
+            <KnowledgeCheck />
+          </div>
+        </details>
         <div className="grid items-start gap-5 lg:grid-cols-3">
           <aside className="surface overflow-hidden">
             <div className="border-b border-line p-4">
@@ -331,7 +352,8 @@ function Library() {
                       {d.status === "review" ? "Needs review" : d.status}
                     </span>
                     <span className="text-xs text-faint">
-                      {bytes(d.byte_size)} · r{d.revision}
+                      {bytes(d.byte_size)} · {d.total_pages > 0 ? `${d.total_pages} pages · ` : ""}r
+                      {d.revision}
                     </span>
                   </span>
                 </button>
@@ -407,6 +429,91 @@ function Library() {
                   </a>
                 </div>
                 <p className="mt-4 text-sm text-muted">{doc.source_note}</p>
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-line bg-bg p-3">
+                    <p className="text-xs text-muted">Original PDF</p>
+                    <p className="mt-1 text-lg font-semibold">
+                      {doc.total_pages > 0
+                        ? `${doc.total_pages} pages`
+                        : doc.media_type === "application/pdf"
+                          ? "Page count pending"
+                          : "File retained"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-bg p-3">
+                    <p className="text-xs text-muted">Searchable sections</p>
+                    <p className="mt-1 text-lg font-semibold">{detail.chunks.length} passages</p>
+                  </div>
+                  <div className="col-span-2 rounded-xl border border-line bg-bg p-3 sm:col-span-1">
+                    <p className="text-xs text-muted">AI availability</p>
+                    <p
+                      className={`mt-1 text-sm font-semibold ${doc.status === "published" ? "text-signal" : ""}`}
+                    >
+                      {doc.status === "published"
+                        ? "Published · available"
+                        : doc.case_id && doc.status === "review"
+                          ? "Ready for this case"
+                          : doc.status === "review"
+                            ? "Needs review & publication"
+                            : doc.status}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs leading-5 text-muted">
+                  Passages are sections of text, not pages. One page can produce several passages.
+                  The original document stays intact.
+                </p>
+                {doc.media_type === "application/pdf" && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <a
+                      className="btn-secondary"
+                      href={`/api/knowledge/${doc.id}/preview`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open original PDF
+                    </a>
+                    {canEdit && !["queued", "processing"].includes(doc.status) && (
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setConfirmReprocess(!confirmReprocess)}
+                      >
+                        Re-extract original
+                      </button>
+                    )}
+                  </div>
+                )}
+                {confirmReprocess && (
+                  <div className="notice-box mt-3">
+                    <p>
+                      Create a fresh extraction with page references and diagnostic table rows? Your
+                      original and previous revisions are retained. This source will need review and
+                      publication again.
+                    </p>
+                    <button
+                      className="btn-primary mt-3"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        setError("");
+                        try {
+                          await api(`/api/knowledge/${doc.id}/reprocess`, { method: "POST" });
+                          setConfirmReprocess(false);
+                          setEditing(false);
+                          await load(doc.id);
+                          await refresh();
+                          changed();
+                        } catch (e) {
+                          setError((e as Error).message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Start new extraction
+                    </button>
+                  </div>
+                )}
                 {doc.case_id && (
                   <p className="notice-box mt-4">
                     Private case attachment. This is not shared library knowledge.
@@ -501,8 +608,26 @@ function Library() {
                 </div>
                 {!canReplaceText && (
                   <p className="mt-3 text-xs text-muted">
-                    This manual is too long for whole-document text editing. Review and publish the
-                    extracted passages, or add a separate technical note for corrections.
+                    Full manual retained. Whole-document text editing is limited to 500,000
+                    characters; this does not limit the knowledge available to search. Use a
+                    separate note for corrections.
+                  </p>
+                )}
+                {!editing && (
+                  <input
+                    className="input mt-4"
+                    aria-label="Search within this source"
+                    placeholder="Find text or a page in this source, e.g. 1208"
+                    value={passageQuery}
+                    onChange={(e) => {
+                      setPassageQuery(e.target.value);
+                      setVisiblePassages(50);
+                    }}
+                  />
+                )}
+                {passageQuery && (
+                  <p className="mt-2 text-xs text-muted">
+                    {filteredPassages.length} matching passages in this revision
                   </p>
                 )}
                 {editing ? (
@@ -522,20 +647,30 @@ function Library() {
                   </label>
                 ) : (
                   <div className="mt-4 max-h-96 space-y-5 overflow-y-auto pr-2">
-                    {detail.chunks.slice(0, visiblePassages).map((c) => (
+                    {filteredPassages.slice(0, visiblePassages).map((c) => (
                       <article key={c.id} className="rounded-lg border border-line bg-bg p-4">
                         <p className="mb-3 font-mono text-xs text-signal">{c.locator}</p>
+                        {doc.media_type === "application/pdf" && /^Page \d+/.test(c.locator) && (
+                          <a
+                            className="mb-3 inline-block text-xs text-signal underline"
+                            target="_blank"
+                            rel="noreferrer"
+                            href={`/api/knowledge/${doc.id}/preview#page=${/^Page (\d+)/.exec(c.locator)![1]}`}
+                          >
+                            Open this PDF page
+                          </a>
+                        )}
                         <div className="text-sm text-muted">
                           <RichText text={c.content} />
                         </div>
                       </article>
                     ))}
-                    {detail.chunks.length > visiblePassages && (
+                    {filteredPassages.length > visiblePassages && (
                       <button
                         className="btn-secondary"
                         onClick={() => setVisiblePassages((count) => count + 50)}
                       >
-                        Show more passages ({visiblePassages} of {detail.chunks.length})
+                        Show more passages ({visiblePassages} of {filteredPassages.length})
                       </button>
                     )}
                     {!detail.chunks.length && !["queued", "processing"].includes(doc.status) && (

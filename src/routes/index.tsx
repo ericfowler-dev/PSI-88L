@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Plus, Send, Square, Paperclip, BookOpen, Menu, X, FileText } from "lucide-react";
+import {
+  Plus,
+  Send,
+  Square,
+  Paperclip,
+  BookOpen,
+  Menu,
+  X,
+  FileText,
+  SearchCheck,
+} from "lucide-react";
 import { Shell } from "@/components/shell";
 import { RichText } from "@/components/rich-text";
+import { KnowledgeCheck } from "@/components/knowledge-check";
 import {
   api,
   SUPPORTED,
@@ -35,6 +46,20 @@ function Desk() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [openCases, setOpenCases] = useState(false);
+  const [openCheck, setOpenCheck] = useState(false);
+  const checkDialog = useRef<HTMLDialogElement>(null);
+  const questionInput = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (openCheck) checkDialog.current?.showModal();
+    else checkDialog.current?.close();
+  }, [openCheck]);
+  useEffect(() => {
+    const input = questionInput.current;
+    if (input) {
+      input.style.height = "44px";
+      input.style.height = `${Math.min(144, Math.max(44, input.scrollHeight))}px`;
+    }
+  }, [question]);
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
@@ -238,24 +263,39 @@ function Desk() {
   return (
     <Shell section="desk" lock>
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-52 shrink-0 flex-col border-r border-line bg-panel lg:flex">
+        <aside
+          className={`${openCases ? "lg:flex" : "lg:hidden"} hidden w-60 shrink-0 flex-col border-r border-line bg-panel`}
+        >
           {caseList}
         </aside>
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-4">
             <button
-              className="btn-icon lg:hidden"
+              className="btn-icon"
               aria-label="Open cases"
-              onClick={() => setOpenCases(true)}
+              onClick={() => setOpenCases(!openCases)}
             >
               <Menu className="size-5" />
             </button>
             <span className="truncate text-sm text-muted">
               {cases.find((c) => c.id === activeId)?.title || "Technical desk"}
             </span>
-            <span className="badge ml-auto shrink-0">
-              {status?.published || 0} published sources
-            </span>
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <button
+                className="btn-icon"
+                title="New case"
+                aria-label="New case"
+                disabled={busy}
+                onClick={() => void newCase().catch((e) => setError(e.message))}
+              >
+                <Plus className="size-4" />
+              </button>
+              <button className="btn-secondary" onClick={() => setOpenCheck(true)}>
+                <SearchCheck className="size-4" />
+                <span className="hidden sm:inline">Check knowledge</span>
+                <span className="sm:hidden">Check</span>
+              </button>
+            </div>
           </div>
           <div
             ref={scroller}
@@ -263,7 +303,7 @@ function Desk() {
             aria-label="Conversation"
             className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8"
           >
-            <div className="mx-auto w-full max-w-6xl space-y-7">
+            <div className="mx-auto w-full max-w-5xl space-y-6 pb-4 text-[15px]">
               {!messages.length ? (
                 <div className="py-3 sm:py-5">
                   <p className="eyebrow">EVIDENCE BEFORE ANSWERS</p>
@@ -315,16 +355,19 @@ function Desk() {
                     key={message.id}
                     className={
                       message.role === "user"
-                        ? "ml-auto max-w-xl rounded-card bg-raised px-4 py-3"
-                        : "border-l-2 border-signal pl-4"
+                        ? "ml-auto max-w-[85%] rounded-2xl rounded-tr-sm bg-raised px-5 py-3 text-ink sm:max-w-2xl"
+                        : "rounded-2xl border border-line bg-panel p-5 sm:p-6"
                     }
                   >
                     {message.role === "user" ? (
                       <p className="whitespace-pre-wrap leading-6">{message.content}</p>
                     ) : (
                       <>
-                        <p className="eyebrow mb-3">
-                          PSI-88L DESK{message.status === "error" ? " · INCOMPLETE" : ""}
+                        <p className="mb-4 flex items-center gap-2 text-xs font-semibold text-signal">
+                          <BookOpen className="size-4" /> PSI-88L
+                          {message.status === "error"
+                            ? " · Incomplete response"
+                            : " · Source-based answer"}
                         </p>
                         {message.content ? (
                           <RichText text={message.content} />
@@ -336,7 +379,8 @@ function Desk() {
                         {!!message.sources?.length && (
                           <details className="mt-4 rounded-lg border border-line px-3 py-2">
                             <summary className="cursor-pointer text-sm text-muted">
-                              View {message.sources.length} source references
+                              View {message.sources.length} source{" "}
+                              {message.sources.length === 1 ? "reference" : "references"}
                             </summary>
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                               {message.sources.map((source, index) => (
@@ -362,8 +406,8 @@ function Desk() {
               )}
             </div>
           </div>
-          <div className="shrink-0 border-t border-line px-4 py-3 sm:px-8">
-            <div className="mx-auto w-full max-w-6xl">
+          <div className="shrink-0 px-4 pb-4 pt-2 sm:px-8">
+            <div className="mx-auto w-full max-w-5xl">
               {error && (
                 <p
                   role="alert"
@@ -399,19 +443,20 @@ function Desk() {
                   e.preventDefault();
                   void ask(question);
                 }}
-                className="rounded-card border border-line bg-panel p-2"
+                className="flex items-end gap-2 rounded-2xl border border-line bg-panel p-2 shadow-lg focus-within:border-signal/60"
               >
                 <label className="sr-only" htmlFor="question">
                   Question for the desk
                 </label>
                 <textarea
+                  ref={questionInput}
                   id="question"
-                  rows={2}
+                  rows={1}
                   maxLength={8000}
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="Describe the symptom, alarm, or information you need…"
-                  className="w-full resize-none bg-transparent px-3 py-2 text-base leading-6 outline-none placeholder:text-faint"
+                  placeholder="Ask PSI-88L…"
+                  className="min-w-0 flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-5 outline-none placeholder:text-faint"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
@@ -419,7 +464,7 @@ function Desk() {
                     }
                   }}
                 />
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex shrink-0 items-center gap-1">
                   <button
                     disabled={busy || uploading}
                     type="button"
@@ -439,9 +484,6 @@ function Desk() {
                     onChange={(e) => e.target.files && void attach(e.target.files)}
                     aria-label="Case attachment files"
                   />
-                  <span className="mr-auto text-xs text-faint">
-                    {uploading ? "Retaining attachments…" : "PDFs, logs, photos & text"}
-                  </span>
                   {busy ? (
                     <button
                       type="button"
@@ -460,14 +502,40 @@ function Desk() {
                   )}
                 </div>
               </form>
-              <p className="mt-2 text-xs leading-5 text-faint">
-                Verify technical guidance against the current service publication and approved site
-                procedures.
-              </p>
+              <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 px-2 text-[11px] text-faint">
+                <span>
+                  {uploading
+                    ? "Saving attachments…"
+                    : `${status?.published || 0} published sources · ${status?.ai.configured ? status.ai.model : "AI not connected"}`}
+                </span>
+                <span>Enter to send · Shift+Enter for a new line</span>
+              </div>
             </div>
           </div>
         </section>
       </div>
+      <dialog
+        ref={checkDialog}
+        onCancel={() => setOpenCheck(false)}
+        className="m-auto max-h-[90dvh] w-[min(900px,94vw)] overflow-auto rounded-2xl border border-line bg-panel p-5 text-ink shadow-2xl backdrop:bg-black/70 sm:p-7"
+        aria-label="Knowledge verification"
+      >
+        <button
+          className="btn-icon float-right"
+          aria-label="Close knowledge check"
+          onClick={() => setOpenCheck(false)}
+        >
+          <X className="size-5" />
+        </button>
+        {openCheck && (
+          <KnowledgeCheck
+            caseId={activeId || undefined}
+            initialQuestion={
+              question || [...messages].reverse().find((m) => m.role === "user")?.content || ""
+            }
+          />
+        )}
+      </dialog>
       {openCases && (
         <div
           role="dialog"

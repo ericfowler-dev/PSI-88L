@@ -119,7 +119,7 @@ test("desktop and mobile: create workspace, retain PDFs and notes, publish, sear
     evidence = JSON.parse(raw).messages[0].content;
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     response.end(
-      `data: ${JSON.stringify({ choices: [{ delta: { content: "Browser verification: the retained marker is QUARTZ-88 [S1]." } }] })}\n\ndata: [DONE]\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Browser verification: the retained marker is **QUARTZ-88** [S1].\n\n## What the source contains\nThe saved commissioning record covers the HT coolant circuit, LT circuit review, and starter observations.\n\n## Next step\nOpen the cited source to review its applicability and original context. This is a synthetic browser verification response." } }] })}\n\ndata: [DONE]\n\n`,
     );
   });
   provider.listen(0, "127.0.0.1");
@@ -156,6 +156,8 @@ test("desktop and mobile: create workspace, retain PDFs and notes, publish, sear
     await page.screenshot({ path: "screenshots/answer-desktop.png", fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: "screenshots/answer-mobile.png", fullPage: true });
+    const input = await page.getByLabel("Question for the desk").boundingBox();
+    expect(input!.height).toBeLessThan(100);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -168,6 +170,73 @@ test("desktop and mobile: create workspace, retain PDFs and notes, publish, sear
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
   expect(errors).toEqual([]);
+});
+
+test("verify exact fault knowledge, inspect PDF pages, and re-extract with publication control", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("qa@example.test");
+  await page.getByLabel(/^Password/).fill("browser-test-password-123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  for (const fmi of [3, 4])
+    pdf
+      .addPage()
+      .drawText(
+        `SPN 1208 / FMI ${fmi}\nSynthetic diagnostic fixture ${fmi === 3 ? "ALPHA-EXACT" : "BETA-DIFFERENT"}.\nThis is a test record, not operational guidance.`,
+        { x: 40, y: 700, size: 12, font },
+      );
+  await page.getByLabel("Upload library files").setInputFiles({
+    name: `diagnostic-fixture-${Date.now()}.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await pdf.save()),
+  });
+  await expect(page.getByRole("button", { name: "Publish knowledge" })).toBeVisible();
+  await expect(page.getByText("2 pages", { exact: true })).toBeVisible();
+  await expect(page.getByText("Needs review & publication", { exact: true })).toBeVisible();
+  const original = page.getByRole("link", { name: "Open original PDF", exact: true });
+  const href = await original.getAttribute("href");
+  const response = await page.request.get(href!);
+  expect(response.headers()["content-type"]).toBe("application/pdf");
+  expect(response.headers()["content-disposition"]).toBe("inline");
+  await page.getByLabel("Search within this source").fill("ALPHA-EXACT");
+  await expect(page.locator("article")).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Open this PDF page" })).toHaveAttribute(
+    "href",
+    /preview#page=1$/,
+  );
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Publish knowledge" }).click();
+  await expect(page.getByText("Published · available", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Re-extract original", exact: true }).click();
+  await page.getByRole("button", { name: "Start new extraction" }).click();
+  await expect(page.getByText("SOURCE · REVISION 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("Needs review & publication", { exact: true })).toBeVisible();
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Publish knowledge" }).click();
+  await expect(page.getByText("Published · available", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "screenshots/source-verification-desktop.png", fullPage: true });
+  await page.getByRole("link", { name: "Desk", exact: true }).click();
+  await page.getByLabel("Question for the desk").fill("1208:3");
+  await page.getByRole("button", { name: "Check knowledge", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Knowledge verification" });
+  await expect(dialog.getByLabel("Search retained knowledge")).toHaveValue("1208:3");
+  await dialog.getByRole("button", { name: "Check", exact: true }).click();
+  await expect(dialog.getByText("Exact fault-code evidence found")).toBeVisible();
+  await expect(dialog.getByText(/ALPHA-EXACT/).first()).toBeVisible();
+  await expect(dialog.getByText(/BETA-DIFFERENT/)).toHaveCount(0);
+  await page.screenshot({ path: "screenshots/knowledge-check-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "screenshots/knowledge-check-mobile.png", fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await dialog.getByLabel("Search retained knowledge").fill("987654:3");
+  await dialog.getByRole("button", { name: "Check", exact: true }).click();
+  await expect(dialog.getByText("No usable evidence found")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
 });
 
 test("long manual progress, passage preview, and failed-upload recovery controls", async ({

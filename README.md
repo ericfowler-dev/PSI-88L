@@ -12,6 +12,7 @@ Repository: [ericfowler-dev/PSI-88L](https://github.com/ericfowler-dev/PSI-88L).
 - Source preview, corrected transcription, immutable text revisions, review acknowledgment, publication/unpublication, and deletion from retrieval.
 - Optional user-initiated image descriptions through a configured vision-capable model. Descriptions are retained as unverified draft source text for review.
 - Indexed PostgreSQL full-text retrieval with engine abbreviations/synonyms and relevant previous-question context.
+- Exact SPN/FMI retrieval across common fault-code formats, a model-independent knowledge check, and labeled extraction for recognized bordered diagnostic tables.
 - Database-backed private cases, messages, case attachments, source snapshots, and streamed answers.
 - Configurable OpenAI Responses, xAI chat-completions, or a compatible chat-completions endpoint. API keys are encrypted at rest and never returned to the browser.
 - Shared database request limits and provider token-usage records.
@@ -43,6 +44,8 @@ To override configuration, copy `.env.example` to `.env`. The app does not need 
 6. Attach a log or photo to a case for private context. Processed case attachments can inform that case without being published to the shared library.
 
 If no relevant source is found, the desk reports the evidence gap instead of asking the model to invent a technical procedure. Citation identifiers are checked for invalid references; this does not prove every generated claim is correct. Qualified review remains necessary.
+
+Use **Check knowledge** in Desk or Library to inspect what retrieval supplies before asking the AI. PDF pages and searchable passages are different counts; inspect page progress and the retained original to check completeness. See [knowledge verification](docs/knowledge-verification.md) for diagnostic-code examples and re-extraction guidance.
 
 ## Production and scaling
 
@@ -97,6 +100,7 @@ Run `npm run validate:blueprint` to check hosting configuration against Render's
 
 - [API reference](docs/api.md)
 - [AI connection setup](docs/ai-connection-setup.md)
+- [Knowledge verification and diagnostic codes](docs/knowledge-verification.md)
 - [Large-manual processing and recovery](docs/large-manual-processing.md)
 - [Changelog](CHANGELOG.md)
 - [Upload and retained-knowledge requirements](docs/file-uploads-and-retained-knowledge.md)

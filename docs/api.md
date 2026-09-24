@@ -33,14 +33,19 @@ Providers: `openai` uses Responses; `xai` uses xAI chat completions; `compatible
 | PATCH | `/api/knowledge/:id` | `{revision,title?,sourceNote?,content?,publish?,acknowledged?}`; revision is mandatory for conflict detection |
 | DELETE | `/api/knowledge/:id` | Remove original file and search content; earlier case answer snapshots remain |
 | GET | `/api/knowledge/:id/download` | Authenticated original-file download |
-| GET | `/api/knowledge/:id/preview` | Authenticated inline preview for supported images |
+| GET | `/api/knowledge/:id/preview` | Authenticated inline preview for PDFs and supported images |
 | POST | `/api/knowledge/:id/retry` | Retry a failed extraction job |
+| POST | `/api/knowledge/:id/reprocess` | Re-extract the retained original into a new queued revision; preserves historical revisions and requires review again |
 | POST | `/api/knowledge/:id/analyze-image` | User-initiated paid vision request; saves a draft text revision, never automatically publishes |
-| POST | `/api/knowledge/search` | `{question,caseId?}`; returns relevant authorized passages without calling the AI |
+| POST | `/api/knowledge/search` | `{question,caseId?}`; returns `{sources,requestedCode,exactCodeMatch,message}` without calling the AI |
 
 Library upload/edit/publication requires editor or administrator access. A reader can attach evidence to their own case. Case ownership is enforced on listing, retrieval, download, preview, and mutation. Case evidence cannot be published directly as shared-library material; create a separately reviewed library source.
 
 Lifecycle: `queued` → `processing` → `review` → `published`. Failed extraction sets `failed` with an actionable error. Unpublishing returns a source to `review`. Text corrections create a new revision and require publication review again.
+
+Reprocessing is available for review, published, or failed sources, with the same editor/owner authorization as other source mutations. The current source is unavailable to retrieval while queued/processing and shared-library sources remain unavailable until republished. Retry instead resumes an existing failed revision from its checkpoint.
+
+Diagnostic searches normalize common SPN/FMI notation. `requestedCode` is `{spn,fmi?}` or null. `exactCodeMatch` reports a matching pair in returned evidence; it does not validate an answer. Source `match` can be `exact_code`, `spn_only`, or `text`. An SPN-only candidate must not be treated as evidence for a different FMI. The standalone search endpoint has no conversation history; supply a complete pair when checking follow-ups.
 
 PDF metadata includes `processed_pages` and `total_pages` (zero until the first batch finishes). Extraction checkpoints and passages commit together. A retry resumes from the last completed batch using the retained original. Partial passages are not available to AI retrieval, and queued, processing, or failed sources cannot be edited or published. Large manuals remain one document with original page citations; the Library displays passages in groups of 50.
 

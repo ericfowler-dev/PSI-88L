@@ -26,6 +26,7 @@ import {
 } from "./knowledge.ts";
 import { deleteStoredFile, readStoredFile } from "./storage.ts";
 import { MAX_FILE_BYTES } from "./extract.ts";
+import { faultCode } from "./diagnostics.ts";
 import {
   aiConfig,
   checkAIConnection,
@@ -283,22 +284,33 @@ async function dispatch(request: Request): Promise<Response> {
   }
   if (path === "/api/knowledge/search" && method === "POST") {
     const body = await jsonBody(request);
+    const question = text(body.question, "Search", 1, 1000);
+    const sources = await retrieve(
+      question,
+      user,
+      typeof body.caseId === "string" ? body.caseId : undefined,
+    );
     return Response.json({
-      sources: await retrieve(
-        text(body.question, "Search", 1, 1000),
-        user,
-        typeof body.caseId === "string" ? body.caseId : undefined,
-      ),
+      sources,
+      requestedCode: faultCode(question) || null,
+      exactCodeMatch: sources.some((source) => source.match === "exact_code"),
+      message: sources.length
+        ? "These are the saved passages that would be supplied to the AI. Check them against the original before relying on technical values."
+        : "No published evidence matched. Check that the manual is uploaded, processed, and published. This check does not call the AI.",
     });
   }
   const documentMatch = path.match(
-    /^\/api\/knowledge\/([a-f0-9-]+)(\/download|\/preview|\/retry|\/analyze-image)?$/,
+    /^\/api\/knowledge\/([a-f0-9-]+)(\/download|\/preview|\/retry|\/reprocess|\/analyze-image)?$/,
   );
   if (documentMatch) {
     const [, id, action] = documentMatch;
     const doc = await getDocument(id, user);
     if (action === "/preview" && method === "GET") {
-      check(doc.media_type.startsWith("image/"), 400, "Only image sources support inline preview.");
+      check(
+        doc.media_type.startsWith("image/") || doc.media_type === "application/pdf",
+        400,
+        "Only PDF and image sources support inline preview.",
+      );
       return new Response(new Uint8Array(await readStoredFile(doc.storage_key)), {
         headers: {
           "Content-Type": doc.media_type,
@@ -351,6 +363,22 @@ async function dispatch(request: Request): Promise<Response> {
           "Cache-Control": "private, no-store",
         },
       });
+    if (action === "/reprocess" && method === "POST") {
+      if (!doc.case_id) requireEditor(user);
+      await db.transaction(async (query) => {
+        const updated = await query(
+          "update documents set status='queued',revision=revision+1,error=null,warnings='[]',processed_pages=0,total_pages=0,updated_at=now() where id=$1 and status in ('review','published','failed') returning id",
+          [id],
+        );
+        check(updated.length, 409, "Wait for processing to finish before extracting again.");
+        await query(
+          "insert into ingestion_jobs(id,document_id) values($1,$2) on conflict(document_id) do update set state='queued',attempts=0,lease_until=null,lease_token=null,created_at=now()",
+          [randomUUID(), id],
+        );
+      });
+      await audit(user, "document.reprocess", id);
+      return Response.json({ ok: true });
+    }
     if (action === "/retry" && method === "POST") {
       if (!doc.case_id) requireEditor(user);
       check(doc.status === "failed", 409, "Only failed sources can be retried.");

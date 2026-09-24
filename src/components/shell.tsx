@@ -14,12 +14,12 @@ export function Shell({
   const { user, logout } = useSession();
   return (
     <div className={lock ? "flex h-dvh flex-col overflow-hidden" : "flex min-h-dvh flex-col"}>
-      <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line bg-panel px-4 py-3 sm:px-6">
-        <Link to="/" className="flex min-h-11 items-center gap-3">
-          <BookOpen className="size-7 text-signal" />
+      <header className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-panel px-3 py-2 sm:px-6">
+        <Link to="/" className="flex min-h-11 items-center gap-2">
+          <BookOpen className="size-6 text-signal" />
           <span>
             <span className="block font-mono text-sm tracking-widest text-signal">PSI-88L</span>
-            <span className="block text-xs text-muted">Knowledge & support</span>
+            <span className="hidden text-xs text-muted sm:block">Knowledge & support</span>
           </span>
         </Link>
         <nav aria-label="Main navigation" className="ml-auto flex items-center gap-1">
